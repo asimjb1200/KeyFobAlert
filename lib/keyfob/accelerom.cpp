@@ -207,20 +207,23 @@ static void readFromAccel(int16_t &raw_x, int16_t &raw_y, int16_t &raw_z)
     }
 }
 
-// Define the Interrupt Service Routine (ISR)
+// Define the Interrupt Service Routine for all pins on Port B
 ISR(PORTB_PORT_vect)
 {
-    // Clear the interrupt flag inside the ISR
-    PORTB.INTFLAGS = PIN3_bm;
+    // Check if PB3 (my freefall pin) caused the interrupt
+    if (PORTB.INTFLAGS & PIN3_bm) {
+        // Clear the interrupt flag of the pin that caused the interrupt
+        PORTB.INTFLAGS = PIN3_bm;
 
-    // code to handle the accelerometer event goes here
-    // I know this was called because a threshold was crossed
-    if (!free_fall_detected)
-    {
-        free_fall_detected = true;
-    }
-    else if (free_fall_detected && !impact_detected)
-    {
-        impact_detected = true;
+        // code to handle the accelerometer event goes here
+        // I know this was called because a threshold was crossed
+        if (!free_fall_detected)
+        {
+            free_fall_detected = true;
+        }
+        else if (free_fall_detected && !impact_detected)
+        {
+            impact_detected = true;
+        }
     }
 }

@@ -55,7 +55,7 @@ void setupAudioInterruptTimer()
     loadAudioBuffer(audio_buffer_B, AUDIO_BUFFER_SIZE);
 }
 
-// plays the audio 
+// interrupt vector for the Timer/Counter Type A (TCA)
 ISR(TCA0_OVF_vect)
 {
     uint8_t *buffer_in_use = getCurrentAudioBuffer();
