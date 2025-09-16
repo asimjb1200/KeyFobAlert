@@ -59,14 +59,14 @@ void setupAudioInterruptTimer()
 void stopAudioSwitchInterruptSetup()
 {
     // set pin PA5 as input
-    PORTA.DIRCLR = (1 << 5); ; // 0b00100000
+    PORTA.DIRCLR = PIN5_bm; // 0b0010 0000
 
     /*
     * Enable the internal pull-up resistor and set interrupt to trigger on a falling edge
     * since pressing the switch will pull the line low
     */ 
     PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PORT_ISC_FALLING_gc;
-    PORTA.INTFLAGS = (1 << 5);// clear any stale flags
+    PORTA.INTFLAGS = PIN5_bm;// clear any stale flags
 }
 
 /*

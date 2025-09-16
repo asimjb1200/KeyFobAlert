@@ -31,11 +31,15 @@ volatile bool impact_detected = false;
 void accelInterruptSetup()
 {
     // set pin as input
-    PORTB.DIRCLR = (1 << 3); // 0b00001000
+    PORTB.DIRCLR = PIN3_bm; // 0b00001000
 
-    // INT1 is active high by default so use the rising edge
+    /*
+    * When no interrupt is active, the pin is held low. 
+    * When an interrupt occurs, the pin will be driven high
+    * so use rising edge to detect interrupts
+    */
     PORTB.PIN3CTRL = PORT_ISC_RISING_gc; // interrupt on rising edge
-    PORTB.INTFLAGS = (1 << 3);            // clear any stale flags
+    PORTB.INTFLAGS = PIN3_bm;            // clear any stale flags
 }
 
 // TODO: Check the data sheets for a compatible BAUD rate
@@ -95,7 +99,7 @@ void accelRegisterConfig()
 
     // With latching enabled, once the interrupt pin goes high,
     // it stays high until you read the source register (INT1_SRC at 0x31)
-    uint8_t ctrl_reg5_cfg = 0b00100000;
+    uint8_t ctrl_reg5_cfg = 0b00001000;
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_CTRL_REG5);
     Wire.write(ctrl_reg5_cfg);
