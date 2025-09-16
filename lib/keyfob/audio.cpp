@@ -18,6 +18,7 @@ volatile bool buffer_A_needs_refill = false;
 volatile bool buffer_B_needs_refill = false;
 volatile bool using_buffer_A = true;
 volatile bool audio_playing = false;
+volatile bool request_audio_stop = false;
 
 // start reading from the very beginning of flash memory.
 static uint32_t current_flash_address = AUDIO_DATA_START; // Track position in flash
@@ -55,7 +56,23 @@ void setupAudioInterruptTimer()
     loadAudioBuffer(audio_buffer_B, AUDIO_BUFFER_SIZE);
 }
 
-// interrupt vector for the Timer/Counter Type A (TCA)
+void stopAudioSwitchInterruptSetup()
+{
+    // set pin PA5 as input
+    PORTA.DIRCLR = (1 << 5); ; // 0b00100000
+
+    /*
+    * Enable the internal pull-up resistor and set interrupt to trigger on a falling edge
+    * since pressing the switch will pull the line low
+    */ 
+    PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PORT_ISC_FALLING_gc;
+    PORTA.INTFLAGS = (1 << 5);// clear any stale flags
+}
+
+/*
+interrupt vector for the Timer/Counter Type A (TCA)
+used to trigger an action every time the timer reaches its maximum count and "overflows" to zero
+*/ 
 ISR(TCA0_OVF_vect)
 {
     uint8_t *buffer_in_use = getCurrentAudioBuffer();

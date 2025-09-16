@@ -27,14 +27,15 @@
 volatile bool free_fall_detected = false;
 volatile bool impact_detected = false;
 
+// TODO: Make sure the bitmask for pin PB3 is correct
 void accelInterruptSetup()
 {
     // set pin as input
-    PORTB.DIRCLR = PIN3_bm; // 0b00001000
+    PORTB.DIRCLR = (1 << 3); // 0b00001000
 
     // INT1 is active high by default so use the rising edge
     PORTB.PIN3CTRL = PORT_ISC_RISING_gc; // interrupt on rising edge
-    PORTB.INTFLAGS = PIN3_bm;            // clear any stale flags
+    PORTB.INTFLAGS = (1 << 3);            // clear any stale flags
 }
 
 // TODO: Check the data sheets for a compatible BAUD rate

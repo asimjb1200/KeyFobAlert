@@ -8,6 +8,7 @@ extern volatile bool buffer_A_needs_refill;
 extern volatile bool buffer_B_needs_refill;
 extern volatile bool using_buffer_A;  // Which buffer DAC is currently using
 extern volatile bool audio_playing;
+extern volatile bool request_audio_stop;
 
 /**
  * @brief Checks if any buffers needs refilling and refills them if necessary
