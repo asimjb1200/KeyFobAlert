@@ -16,3 +16,4 @@ void accelCheckForInterruptEvents();
  * @brief sets all of the necessary registers to get meaningful data from the LIS2DH12 and to choose what events will generate interrupts
  */
 void accelRegisterConfig();
+void deviceRecovered();

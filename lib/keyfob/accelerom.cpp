@@ -156,7 +156,7 @@ static void determineEvent()
     float magnitude = sqrt(x_g * x_g + y_g * y_g + z_g * z_g);
 
     // Check the magnitude to determine the type of event
-    if (magnitude <= 0.5) // A low-g threshold for free-fall
+    if (magnitude <= 0.5 && magnitude > 0.1) // A low-g threshold for free-fall
     {
         free_fall_detected = true;
         impact_detected = false; // Reset impact flag for new sequence
@@ -210,6 +210,11 @@ static void readFromAccel(int16_t &raw_x, int16_t &raw_y, int16_t &raw_z)
         uint8_t z_high = Wire.read();
         raw_z = (z_high << 8) | z_low;
     }
+}
+
+void deviceRecovered() {
+    free_fall_detected = false;
+    impact_detected = false;
 }
 
 // Define the Interrupt Service Routine for all pins on Port B

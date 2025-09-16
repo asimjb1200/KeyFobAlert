@@ -98,6 +98,19 @@ ISR(TCA0_OVF_vect)
     TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
 }
 
+/**
+ * interrupt vector for the pins on port A
+ * will be used to detect the switch that is intended to cut audio
+ */
+ISR(PORTA_PORT_vect) {
+    // Check if the interrupt came from my switch
+    if (PORTA.INTFLAGS & PIN5_bm) {
+        PORTA.INTFLAGS = PIN5_bm; // Clear the interrupt flag for PA5
+
+        request_audio_stop = true;
+    }
+}
+
 void checkAndFillEmptyAudioBuffer()
 {
     if (buffer_B_needs_refill && using_buffer_A)
@@ -188,16 +201,17 @@ static uint8_t *getCurrentAudioBuffer()
     }
 }
 
-void pauseAudio(void) {
+void pauseAudio() {
     // Disable the timer interrupt that drives audio playback
     TIMER_PERIPHERAL.SINGLE.INTCTRL &= ~TCA_SINGLE_OVF_bm; // Disable overflow interrupt
     
     // Optional: Set DAC to mid-scale to avoid pop/click
     DAC0.DATA = 128;  // 1.25V - silent level
     audio_playing = false;
+    request_audio_stop = false;
 }
 
-void enableAudio(void) {
+void enableAudio() {
     // Enable the overflow interrupt for TCA0
     // TCA0.SINGLE.INTCTRL: Interrupt Control register for TCA0 (Single mode)
     // OVF_bm: Overflow Interrupt Enable bit

@@ -19,7 +19,7 @@ void checkAndFillEmptyAudioBuffer();
  * @brief configure the interrupt for sampling audio and pre fill the two buffers
  */
 void setupAudioInterruptTimer();
-void disableAudio();
+void pauseAudio();
 /**
  * @brief Enable the overflow interrupt for TCA0, which is what allows the ISR
  * to run and feed audio data samples to the speaker, I.E. plays the audio
