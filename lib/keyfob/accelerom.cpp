@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <accelerom.h>
 
 #define ACCEL_INT_PIN PIN_PB3
 
@@ -28,7 +29,7 @@ volatile bool free_fall_detected = false;
 volatile bool impact_detected = false;
 
 // TODO: Make sure the bitmask for pin PB3 is correct
-void accelInterruptSetup()
+void accelInterruptPinSetup()
 {
     // set pin as input
     PORTB.DIRCLR = PIN3_bm; // 0b00001000
@@ -47,22 +48,44 @@ void twiSetup()
     accelRegisterConfig();
 }
 
-void accelRegisterConfig()
+int accelRegisterConfig()
 {
+    uint8_t status;
+
     // set data rate to 100Hz and enable all axis
     uint8_t dataRateConfig = 0b01010111;
 
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_CTRL_REG1);
     Wire.write(dataRateConfig);
-    Wire.endTransmission();
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG1_FAILED, status);
+        return -1;
+    }
 
     // block update, little endian, +/-2g resolution, normal operating mode
     uint8_t ctrlReg4Config = 0b10000000;
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_CTRL_REG4);
     Wire.write(ctrlReg4Config);
-    Wire.endTransmission();
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG4_FAILED, status);
+        return -1;
+    }
+
+    // activate the interrupts on physical INT1 pin
+    // INTERRUPT ACTIVE = IA
+    uint8_t ctrl_reg3_cfg = 0b01000000; // I1_IA1 = 1
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_CTRL_REG3);
+    Wire.write(ctrl_reg3_cfg);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG3_FAILED, status);
+        return -1;
+    }
 
     /**
      * To detect free-fall, you need a low-g threshold
@@ -73,14 +96,22 @@ void accelRegisterConfig()
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_INT1_THS);
     Wire.write(0b00000110);
-    Wire.endTransmission();
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_INT1_THS_FAILED, status);
+        return -1;
+    }
 
     // set the duration needed before the interrupt event is considered valid
     // I want 50ms so since 1 LSB = 1/0DR ~ 10ms I can use 5 as the multiplier
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_INT1_DURATION);
-    Wire.write(5);
-    Wire.endTransmission();
+    Wire.write(0b00000101);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_INT1_DURATION_FAILED, status);
+        return -1;
+    }
 
     // CONFIGURE INTERRUPT (INT1_CFG)
     // 0b10010101:
@@ -92,15 +123,11 @@ void accelRegisterConfig()
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_INT1_CFG);
     Wire.write(int1_cfg_reg);
-    Wire.endTransmission();
-
-    // activate the interrupts on physical INT1 pin
-    // INTERRUPT ACTIVE = IA
-    uint8_t ctrl_reg3_cfg = 0b01000000; // I1_IA1 = 1
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_CTRL_REG3);
-    Wire.write(ctrl_reg3_cfg);
-    Wire.endTransmission();
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_INT1_CFG_FAILED, status);
+        return -1;
+    }
 
     // With latching enabled, once the interrupt pin goes high,
     // it stays high until you read the source register (INT1_SRC at 0x31)
@@ -108,7 +135,100 @@ void accelRegisterConfig()
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_CTRL_REG5);
     Wire.write(ctrl_reg5_cfg);
-    Wire.endTransmission();
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG5_FAILED, status);
+        return -1;
+    }
+
+    handleAccelError(AccelConfigError::ACCEL_SUCCESS, status);
+    return AccelConfigError::ACCEL_SUCCESS;
+}
+
+void handleAccelError(int errorCode, uint8_t status) {
+  switch (errorCode) {
+    case ACCEL_SUCCESS:
+      Serial.println("Accelerometer configured successfully");
+      break;
+      
+    case ACCEL_CTRL_REG1_FAILED:
+      Serial.println("ERROR: Failed to write CTRL_REG1 (data rate/axis enable)");
+      printI2CStatus(status);
+      Serial.println("Check: I2C connection, device power, pull-up resistors");
+      break;
+      
+    case ACCEL_CTRL_REG4_FAILED:
+      Serial.println("ERROR: Failed to write CTRL_REG4 (full scale/BDU)");
+      printI2CStatus(status);
+      Serial.println("Check: Device may be unresponsive or in incorrect mode");
+      break;
+      
+    case ACCEL_CTRL_REG3_FAILED:
+      Serial.println("ERROR: Failed to write CTRL_REG3 (interrupt routing)");
+      printI2CStatus(status);
+      Serial.println("Check: Device communication integrity");
+      break;
+      
+    case ACCEL_INT1_THS_FAILED:
+      Serial.println("ERROR: Failed to write INT1_THS (interrupt threshold)");
+      printI2CStatus(status);
+      Serial.println("Check: Register address correct, device responsive");
+      break;
+      
+    case ACCEL_INT1_DURATION_FAILED:
+      Serial.println("ERROR: Failed to write INT1_DURATION (interrupt duration)");
+      printI2CStatus(status);
+      Serial.println("Check: Previous register writes may have failed");
+      break;
+      
+    case ACCEL_INT1_CFG_FAILED:
+      Serial.println("ERROR: Failed to write INT1_CFG (interrupt configuration)");
+      printI2CStatus(status);
+      Serial.println("Check: Free fall detection setup may be incomplete");
+      break;
+      
+    case ACCEL_CTRL_REG5_FAILED:
+      Serial.println("ERROR: Failed to write CTRL_REG5 (interrupt latch)");
+      printI2CStatus(status);
+      Serial.println("Check: Final configuration step failed");
+      break;
+      
+    default:
+      Serial.print("ERROR: Unknown error code: ");
+      Serial.println(errorCode);
+      printI2CStatus(status);
+      break;
+  }
+}
+
+void printI2CStatus(uint8_t status) {
+  Serial.print("I2C Status Code: ");
+  Serial.print(status);
+  Serial.print(" - ");
+  
+  switch (status) {
+    case 0:
+      Serial.println("Success");
+      break;
+    case 1:
+      Serial.println("Data too long for transmit buffer");
+      break;
+    case 2:
+      Serial.println("NACK on address (device not found at 0x19)");
+      break;
+    case 3:
+      Serial.println("NACK on data transmission");
+      break;
+    case 4:
+      Serial.println("Other I2C error");
+      break;
+    case 5:
+      Serial.println("Timeout");
+      break;
+    default:
+      Serial.println("Unknown status code");
+      break;
+  }
 }
 
 static void manualTwiSetup()
