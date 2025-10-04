@@ -42,7 +42,6 @@ void accelInterruptSetup()
     PORTB.INTFLAGS = PIN3_bm;            // clear any stale flags
 }
 
-// TODO: Check the data sheets for a compatible BAUD rate
 void twiSetup()
 {
     accelRegisterConfig();
@@ -65,14 +64,15 @@ void accelRegisterConfig()
     Wire.write(ctrlReg4Config);
     Wire.endTransmission();
 
-    // I want my threshold to be 0.4g
-    // need to convert it to milligrams to work with the accel register
-    // 0.4g * 1000mg/g = 400mg - g force in mg
-    // divide by the register factor to give it increments that it understands
-    // 400mg/16mg LSB = 25
+    /**
+     * To detect free-fall, you need a low-g threshold
+     * a good threshold is ≈ 100 mg
+     * (100 mg / 16 mg/LSB) ​≈ 6.25 0b00000110 (6 in 8 bit)
+     * (6 x 16 mg/LSB) = 96mg free fall threshold
+     */
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_INT1_THS);
-    Wire.write(25);
+    Wire.write(0b00000110);
     Wire.endTransmission();
 
     // set the duration needed before the interrupt event is considered valid
@@ -82,11 +82,16 @@ void accelRegisterConfig()
     Wire.write(5);
     Wire.endTransmission();
 
-    // interrupts generate on x, y & z axes
-    uint8_t int_cfg_reg = 0b00111111;
+    // CONFIGURE INTERRUPT (INT1_CFG)
+    // 0b10010101:
+    //   Bit 7 (AOI)  = 1 (AND logic for all enabled events)
+    //   Bit 4 (ZLIE) = 1 (Enable Z Low-g interrupt)
+    //   Bit 2 (YLIE) = 1 (Enable Y Low-g interrupt)
+    //   Bit 0 (XLIE) = 1 (Enable X Low-g interrupt)
+    uint8_t int1_cfg_reg = 0b10010101;
     Wire.beginTransmission(ACCEL_ADDRESS);
     Wire.write(ACCEL_INT1_CFG);
-    Wire.write(int_cfg_reg);
+    Wire.write(int1_cfg_reg);
     Wire.endTransmission();
 
     // activate the interrupts on physical INT1 pin
