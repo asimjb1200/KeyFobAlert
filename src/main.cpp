@@ -19,7 +19,7 @@ void setup()
   if (status != AccelConfigError::ACCEL_SUCCESS) {
     while(1) {
       // Halt execution
-      delay(1000);  // Optional: blink an LED or keep watchdog happy
+      delay(1000);
     }
   }
   // SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
@@ -31,7 +31,7 @@ void loop()
   // check for interrupts from accelerometer
   accelCheckForInterruptEvents();
 
-  if (free_fall_detected && impact_detected && !audio_playing)
+  if (free_fall_detected && !audio_playing)
   {
       // play audio
       enableAudio();

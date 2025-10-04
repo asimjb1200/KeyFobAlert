@@ -26,7 +26,7 @@
 #define OUT_Z_H 0x2D
 
 volatile bool free_fall_detected = false;
-volatile bool impact_detected = false;
+//volatile bool impact_detected = false;
 
 // TODO: Make sure the bitmask for pin PB3 is correct
 void accelInterruptPinSetup()
@@ -41,11 +41,6 @@ void accelInterruptPinSetup()
     */
     PORTB.PIN3CTRL = PORT_ISC_RISING_gc; // interrupt on rising edge
     PORTB.INTFLAGS = PIN3_bm;            // clear any stale flags
-}
-
-void twiSetup()
-{
-    accelRegisterConfig();
 }
 
 int accelRegisterConfig()
@@ -248,7 +243,7 @@ static void manualTwiSetup()
 
 void accelCheckForInterruptEvents()
 {
-    if (free_fall_detected || impact_detected)
+    if (free_fall_detected)
     {
         // process force data
         determineEvent();
@@ -280,20 +275,14 @@ static void determineEvent()
 
     float magnitude = sqrt(x_g * x_g + y_g * y_g + z_g * z_g);
 
-    // Check the magnitude to determine the type of event
-    if (magnitude <= 0.5 && magnitude > 0.1) // A low-g threshold for free-fall
-    {
+    /**
+     * In free fall, the sum of the squares of the acceleration components 
+     * (x² + y² + z²) should be much less than 1 g²
+     */
+    if (magnitude < 0.3) { 
         free_fall_detected = true;
-        impact_detected = false; // Reset impact flag for new sequence
-    }
-    else if (magnitude >= 2.0 && free_fall_detected)
-    {
-        impact_detected = true;
-    }
-    else
-    {
+    } else {
         free_fall_detected = false;
-        impact_detected = false;
     }
 
     // Read the source register so that the pin can go back low
@@ -339,7 +328,7 @@ static void readFromAccel(int16_t &raw_x, int16_t &raw_y, int16_t &raw_z)
 
 void deviceRecovered() {
     free_fall_detected = false;
-    impact_detected = false;
+    //impact_detected = false;
 }
 
 // Define the Interrupt Service Routine for all pins on Port B
@@ -355,10 +344,6 @@ ISR(PORTB_PORT_vect)
         if (!free_fall_detected)
         {
             free_fall_detected = true;
-        }
-        else if (free_fall_detected && !impact_detected)
-        {
-            impact_detected = true;
         }
     }
 }

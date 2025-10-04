@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 extern volatile bool free_fall_detected;
-extern volatile bool impact_detected;
+//extern volatile bool impact_detected;
 enum AccelConfigError {
   ACCEL_SUCCESS = 0,
   ACCEL_CTRL_REG1_FAILED = -1,
