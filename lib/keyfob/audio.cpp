@@ -39,6 +39,76 @@ static void initializeDAC()
     DAC0.DATA = 128;
 }
 
+static uint8_t *getCurrentAudioBuffer()
+{
+    if (using_buffer_A && !buffer_A_needs_refill)
+    {
+        return audio_buffer_A;
+    }
+    else if (!using_buffer_A && !buffer_B_needs_refill)
+    {
+        return audio_buffer_B;
+    }
+    else
+    {
+        // Buffer not ready, return a safe fallback (e.g., silence)
+        static uint8_t silence_buffer[AUDIO_BUFFER_SIZE] = {0};
+        return silence_buffer;
+    }
+}
+
+// This would be called when current buffer is nearly empty
+static void swapBuffers()
+{
+    if (using_buffer_A)
+    {
+        // Switch to buffer B, reload buffer A in background
+        noInterrupts();
+        using_buffer_A = false;
+        buffer_A_needs_refill = true;
+        interrupts();
+    }
+    else
+    {
+        // Switch to buffer A, reload buffer B in background
+        noInterrupts();
+        using_buffer_A = true;
+        buffer_B_needs_refill = true;
+        interrupts();
+    }
+}
+
+static void loadAudioBuffer(uint8_t *buffer, uint16_t size)
+{
+    // Check if we would go past end of audio file
+    if (current_flash_address + size > AUDIO_DATA_END)
+    {
+        // Loop back to beginning of audio
+        current_flash_address = AUDIO_DATA_START;
+    }
+
+    waitForFlashReady(); 
+
+    digitalWrite(FLASH_CS_PIN, LOW);
+
+    // Send READ command + address
+    SPI.transfer(FLASH_READ_CMD);
+    SPI.transfer((current_flash_address >> 16) & 0xFF);
+    SPI.transfer((current_flash_address >> 8) & 0xFF);
+    SPI.transfer(current_flash_address & 0xFF);
+
+    // Read audio data into buffer
+    for (uint16_t i = 0; i < size; i++)
+    {
+        buffer[i] = SPI.transfer(0x00);
+    }
+
+    digitalWrite(FLASH_CS_PIN, HIGH);
+
+    // Update flash address for next read
+    current_flash_address += size;
+}
+
 void setupAudioInterruptTimer()
 {
     initializeDAC();
@@ -128,76 +198,6 @@ void checkAndFillEmptyAudioBuffer()
         noInterrupts();
         buffer_A_needs_refill = false;
         interrupts();
-    }
-}
-
-static void loadAudioBuffer(uint8_t *buffer, uint16_t size)
-{
-    // Check if we would go past end of audio file
-    if (current_flash_address + size > AUDIO_DATA_END)
-    {
-        // Loop back to beginning of audio
-        current_flash_address = AUDIO_DATA_START;
-    }
-
-    waitForFlashReady(); 
-
-    digitalWrite(FLASH_CS_PIN, LOW);
-
-    // Send READ command + address
-    SPI.transfer(FLASH_READ_CMD);
-    SPI.transfer((current_flash_address >> 16) & 0xFF);
-    SPI.transfer((current_flash_address >> 8) & 0xFF);
-    SPI.transfer(current_flash_address & 0xFF);
-
-    // Read audio data into buffer
-    for (uint16_t i = 0; i < size; i++)
-    {
-        buffer[i] = SPI.transfer(0x00);
-    }
-
-    digitalWrite(FLASH_CS_PIN, HIGH);
-
-    // Update flash address for next read
-    current_flash_address += size;
-}
-
-// This would be called when current buffer is nearly empty
-static void swapBuffers()
-{
-    if (using_buffer_A)
-    {
-        // Switch to buffer B, reload buffer A in background
-        noInterrupts();
-        using_buffer_A = false;
-        buffer_A_needs_refill = true;
-        interrupts();
-    }
-    else
-    {
-        // Switch to buffer A, reload buffer B in background
-        noInterrupts();
-        using_buffer_A = true;
-        buffer_B_needs_refill = true;
-        interrupts();
-    }
-}
-
-static uint8_t *getCurrentAudioBuffer()
-{
-    if (using_buffer_A && !buffer_A_needs_refill)
-    {
-        return audio_buffer_A;
-    }
-    else if (!using_buffer_A && !buffer_B_needs_refill)
-    {
-        return audio_buffer_B;
-    }
-    else
-    {
-        // Buffer not ready, return a safe fallback (e.g., silence)
-        static uint8_t silence_buffer[AUDIO_BUFFER_SIZE] = {0};
-        return silence_buffer;
     }
 }
 
