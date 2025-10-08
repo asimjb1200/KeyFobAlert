@@ -5,6 +5,7 @@
 
 #define ACCEL_ADDRESS 0x18
 #define ACCEL_CTRL_REG1 0X20
+#define ACCEL_CTRL_REG2 0X21
 #define ACCEL_CTRL_REG3 0X22
 #define ACCEL_CTRL_REG4 0X23
 #define ACCEL_CTRL_REG5 0X24
@@ -26,118 +27,120 @@
 #define OUT_Z_H 0x2D
 
 volatile bool free_fall_detected = false;
-//volatile bool impact_detected = false;
 
-// TODO: Make sure the bitmask for pin PB3 is correct
-void accelInterruptPinSetup()
-{
-    // set pin as input
-    PORTB.DIRCLR = PIN3_bm; // 0b00001000
-
-    /*
-    * When no interrupt is active, the pin is held low. 
-    * When an interrupt occurs, the pin will be driven high
-    * so use rising edge to detect interrupts
-    */
-    PORTB.PIN3CTRL = PORT_ISC_RISING_gc; // interrupt on rising edge
-    PORTB.INTFLAGS = PIN3_bm;            // clear any stale flags
-}
-
-int accelRegisterConfig()
-{
+static int readFromAccel(int16_t &raw_x, int16_t &raw_y, int16_t &raw_z)
+{   
     uint8_t status;
 
-    // set data rate to 100Hz and enable all axis
-    uint8_t dataRateConfig = 0b01010111;
-
     Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_CTRL_REG1);
-    Wire.write(dataRateConfig);
-    status = Wire.endTransmission();
+
+    // To enable address auto-increment, set the MSB of the register address to 1.
+    // 0x28 becomes 0x28 | 0x80 = 0xA8
+    Wire.write(OUT_X_L | 0x80); // Start reading at OUT_X_L and automatically increment
+    status = Wire.endTransmission(false);
     if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_CTRL_REG1_FAILED, status);
-        return -1;
+
+      return -1;
     }
 
-    // block update, little endian, +/-2g resolution, normal operating mode
-    uint8_t ctrlReg4Config = 0b10000000;
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_CTRL_REG4);
-    Wire.write(ctrlReg4Config);
-    status = Wire.endTransmission();
+    // Request 6 bytes of data. The accelerometer will send the bytes from OUT_X_L and OUT_X_H
+    Wire.requestFrom(ACCEL_ADDRESS, 6);
+
+    if (Wire.available() == 6)
+    {
+        // Read the two bytes from X
+        uint8_t x_low = Wire.read();
+        uint8_t x_high = Wire.read();
+        // Combine them into a 16-bit signed integer
+        // The LIS2DH12 uses little-endian format (low byte first)
+        raw_x = (x_high << 8) | x_low;
+
+        // two bytes from Y
+        uint8_t y_low = Wire.read();
+        uint8_t y_high = Wire.read();
+        raw_y = (y_high << 8) | y_low;
+
+        // two bytes from Z
+        uint8_t z_low = Wire.read();
+        uint8_t z_high = Wire.read();
+        raw_z = (z_high << 8) | z_low;
+
+        return 0;
+    } else {
+      return -1
+    }
+}
+
+// Determine the Event:
+//  If the magnitude is low (e.g., less than 0.2g), likely a free-fall event.
+//  If the magnitude is high (e.g., greater than 2g) impact event
+static void determineEvent()
+{
+    int8_t status;
+    int16_t raw_x, raw_y, raw_z;
+    status = readFromAccel(raw_x, raw_y, raw_z);
     if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_CTRL_REG4_FAILED, status);
-        return -1;
+
     }
 
-    // activate the interrupts on physical INT1 pin
-    // INTERRUPT ACTIVE = IA
-    uint8_t ctrl_reg3_cfg = 0b01000000; // I1_IA1 = 1
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_CTRL_REG3);
-    Wire.write(ctrl_reg3_cfg);
-    status = Wire.endTransmission();
-    if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_CTRL_REG3_FAILED, status);
-        return -1;
-    }
+    // make sense of the readings to distinguish between free fall and impact based on g force
+
+    // Right-Shift for 10-bit Data
+    int16_t shifted_x = raw_x >> 6;
+    int16_t shifted_y = raw_y >> 6;
+    int16_t shifted_z = raw_z >> 6;
+
+    float x_g = (float)shifted_x * 4.0 / 1000.0;
+    float y_g = (float)shifted_y * 4.0 / 1000.0;
+    float z_g = (float)shifted_z * 4.0 / 1000.0;
+
+    float magnitude = sqrt(x_g * x_g + y_g * y_g + z_g * z_g);
 
     /**
-     * To detect free-fall, you need a low-g threshold
-     * a good threshold is ≈ 100 mg
-     * (100 mg / 16 mg/LSB) ​≈ 6.25 0b00000110 (6 in 8 bit)
-     * (6 x 16 mg/LSB) = 96mg free fall threshold
+     * In free fall, the sum of the squares of the acceleration components 
+     * (x² + y² + z²) should be much less than 1 g²
      */
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_INT1_THS);
-    Wire.write(0b00000110);
-    status = Wire.endTransmission();
-    if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_INT1_THS_FAILED, status);
-        return -1;
+    if (magnitude < 0.3 && magnitude) { 
+        free_fall_detected = true;
+    } else {
+        free_fall_detected = false;
     }
 
-    // set the duration needed before the interrupt event is considered valid
-    // I want 50ms so since 1 LSB = 1/0DR ~ 10ms I can use 5 as the multiplier
+    // Read the source register so that the pin can go back low
     Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_INT1_DURATION);
-    Wire.write(0b00000101);
-    status = Wire.endTransmission();
-    if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_INT1_DURATION_FAILED, status);
-        return -1;
-    }
+    Wire.write(ACCEL_INT1_SRC);
+    Wire.endTransmission(false);
+    Wire.requestFrom(ACCEL_ADDRESS, 1);
+}
 
-    // CONFIGURE INTERRUPT (INT1_CFG)
-    // 0b10010101:
-    //   Bit 7 (AOI)  = 1 (AND logic for all enabled events)
-    //   Bit 4 (ZLIE) = 1 (Enable Z Low-g interrupt)
-    //   Bit 2 (YLIE) = 1 (Enable Y Low-g interrupt)
-    //   Bit 0 (XLIE) = 1 (Enable X Low-g interrupt)
-    uint8_t int1_cfg_reg = 0b10010101;
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_INT1_CFG);
-    Wire.write(int1_cfg_reg);
-    status = Wire.endTransmission();
-    if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_INT1_CFG_FAILED, status);
-        return -1;
-    }
-
-    // With latching enabled, once the interrupt pin goes high,
-    // it stays high until you read the source register (INT1_SRC at 0x31)
-    uint8_t ctrl_reg5_cfg = 0b00001000;
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_CTRL_REG5);
-    Wire.write(ctrl_reg5_cfg);
-    status = Wire.endTransmission();
-    if (status != 0) {
-        handleAccelError(AccelConfigError::ACCEL_CTRL_REG5_FAILED, status);
-        return -1;
-    }
-
-    handleAccelError(AccelConfigError::ACCEL_SUCCESS, status);
-    return AccelConfigError::ACCEL_SUCCESS;
+void printI2CStatus(uint8_t status) {
+  Serial.print("I2C Status Code: ");
+  Serial.print(status);
+  Serial.print(" - ");
+  
+  switch (status) {
+    case 0:
+      Serial.println("Success");
+      break;
+    case 1:
+      Serial.println("Data too long for transmit buffer");
+      break;
+    case 2:
+      Serial.println("NACK on address (device not found at 0x19)");
+      break;
+    case 3:
+      Serial.println("NACK on data transmission");
+      break;
+    case 4:
+      Serial.println("Other I2C error");
+      break;
+    case 5:
+      Serial.println("Timeout");
+      break;
+    default:
+      Serial.println("Unknown status code");
+      break;
+  }
 }
 
 void handleAccelError(int errorCode, uint8_t status) {
@@ -148,6 +151,12 @@ void handleAccelError(int errorCode, uint8_t status) {
       
     case ACCEL_CTRL_REG1_FAILED:
       Serial.println("ERROR: Failed to write CTRL_REG1 (data rate/axis enable)");
+      printI2CStatus(status);
+      Serial.println("Check: I2C connection, device power, pull-up resistors");
+      break;
+
+    ase ACCEL_CTRL_REG2_FAILED:
+      Serial.println("ERROR: Failed to write CTRL_REG2 (high pass filter)");
       printI2CStatus(status);
       Serial.println("Check: I2C connection, device power, pull-up resistors");
       break;
@@ -196,34 +205,125 @@ void handleAccelError(int errorCode, uint8_t status) {
   }
 }
 
-void printI2CStatus(uint8_t status) {
-  Serial.print("I2C Status Code: ");
-  Serial.print(status);
-  Serial.print(" - ");
-  
-  switch (status) {
-    case 0:
-      Serial.println("Success");
-      break;
-    case 1:
-      Serial.println("Data too long for transmit buffer");
-      break;
-    case 2:
-      Serial.println("NACK on address (device not found at 0x19)");
-      break;
-    case 3:
-      Serial.println("NACK on data transmission");
-      break;
-    case 4:
-      Serial.println("Other I2C error");
-      break;
-    case 5:
-      Serial.println("Timeout");
-      break;
-    default:
-      Serial.println("Unknown status code");
-      break;
-  }
+void accelInterruptPinSetup()
+{
+    // set pin as input
+    PORTB.DIRCLR = PIN3_bm; // 0b00001000
+
+    /*
+    * When no interrupt is active, the pin is held low. 
+    * When an interrupt occurs, the pin will be driven high
+    * so use rising edge to detect interrupts
+    */
+    PORTB.PIN3CTRL = PORT_ISC_RISING_gc; // interrupt on rising edge
+    PORTB.INTFLAGS = PIN3_bm;            // clear any stale flags
+}
+
+int accelRegisterConfig()
+{
+    uint8_t status;
+
+    // set data rate to 100Hz and enable all axis 57h
+    uint8_t dataRateConfig = 0b01010111;
+
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_CTRL_REG1);
+    Wire.write(dataRateConfig);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG1_FAILED, status);
+        return -1;
+    }
+
+    // High-pass filter disabled 00h
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_CTRL_REG2);
+    Wire.write(0b00000000);
+    status = Wire.endTransmission();
+    if (status != 0) {
+      handleAccelError(AccelConfigError::ACCEL_CTRL_REG2_FAILED, status);
+      return -1;
+    }
+
+    // activate the interrupts on physical INT1 pin
+    // INTERRUPT ACTIVE = IA
+    uint8_t ctrl_reg3_cfg = 0b01000000; // I1_IA1 = 1
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_CTRL_REG3);
+    Wire.write(ctrl_reg3_cfg);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG3_FAILED, status);
+        return -1;
+    }
+
+    // block update, little endian, +/-2g resolution, normal operating mode
+    uint8_t ctrlReg4Config = 0b10000000;
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_CTRL_REG4);
+    Wire.write(ctrlReg4Config);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG4_FAILED, status);
+        return -1;
+    }
+
+    /**
+    * With latching enabled, once the interrupt pin goes high,
+    * it stays high until you read the source register (INT1_SRC at 0x31)
+    */ 
+    uint8_t ctrl_reg5_cfg = 0b00001000;
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_CTRL_REG5);
+    Wire.write(ctrl_reg5_cfg);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_CTRL_REG5_FAILED, status);
+        return -1;
+    }
+
+    /**
+     * To detect free-fall, you need a low-g threshold
+     * a good threshold is ≈ 100 mg so 7h is 112mg
+     */
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_INT1_THS);
+    Wire.write(0b00000111);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_INT1_THS_FAILED, status);
+        return -1;
+    }
+
+    // set the duration needed before the interrupt event is considered valid
+    // I want 50ms so since 1 LSB = 1/0DR ~ 10ms I can use 5 as the multiplier
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_INT1_DURATION);
+    Wire.write(0b00000101);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_INT1_DURATION_FAILED, status);
+        return -1;
+    }
+
+    // CONFIGURE INTERRUPT (INT1_CFG)
+    // 0b10010101:
+    //   Bit 7 (AOI)  = 1 (AND logic for all enabled events)
+    //   Bit 4 (ZLIE) = 1 (Enable Z Low-g interrupt)
+    //   Bit 2 (YLIE) = 1 (Enable Y Low-g interrupt)
+    //   Bit 0 (XLIE) = 1 (Enable X Low-g interrupt)
+    uint8_t int1_cfg_reg = 0b10010101;
+    Wire.beginTransmission(ACCEL_ADDRESS);
+    Wire.write(ACCEL_INT1_CFG);
+    Wire.write(int1_cfg_reg);
+    status = Wire.endTransmission();
+    if (status != 0) {
+        handleAccelError(AccelConfigError::ACCEL_INT1_CFG_FAILED, status);
+        return -1;
+    }
+
+    handleAccelError(AccelConfigError::ACCEL_SUCCESS, status);
+    return AccelConfigError::ACCEL_SUCCESS;
 }
 
 static void manualTwiSetup()
@@ -251,78 +351,6 @@ void accelCheckForInterruptEvents()
     else
     {
         return;
-    }
-}
-
-// Determine the Event:
-//  If the magnitude is low (e.g., less than 0.2g), likely a free-fall event.
-//  If the magnitude is high (e.g., greater than 2g) impact event
-static void determineEvent()
-{
-    int16_t raw_x, raw_y, raw_z;
-    readFromAccel(raw_x, raw_y, raw_z);
-
-    // make sense of the readings to distinguish between free fall and impact based on g force
-
-    // Right-Shift for 10-bit Data
-    int16_t shifted_x = raw_x >> 6;
-    int16_t shifted_y = raw_y >> 6;
-    int16_t shifted_z = raw_z >> 6;
-
-    float x_g = (float)shifted_x * 4.0 / 1000.0;
-    float y_g = (float)shifted_y * 4.0 / 1000.0;
-    float z_g = (float)shifted_z * 4.0 / 1000.0;
-
-    float magnitude = sqrt(x_g * x_g + y_g * y_g + z_g * z_g);
-
-    /**
-     * In free fall, the sum of the squares of the acceleration components 
-     * (x² + y² + z²) should be much less than 1 g²
-     */
-    if (magnitude < 0.3) { 
-        free_fall_detected = true;
-    } else {
-        free_fall_detected = false;
-    }
-
-    // Read the source register so that the pin can go back low
-    Wire.beginTransmission(ACCEL_ADDRESS);
-    Wire.write(ACCEL_INT1_SRC);
-    Wire.endTransmission(false);
-    Wire.requestFrom(ACCEL_ADDRESS, 1);
-}
-
-// TODO: ADD ERROR HANDLING TO ACCELERATOR READING
-static void readFromAccel(int16_t &raw_x, int16_t &raw_y, int16_t &raw_z)
-{
-    Wire.beginTransmission(ACCEL_ADDRESS);
-
-    //    To enable address auto-increment, set the MSB of the register address to 1.
-    //    0x28 becomes 0x28 | 0x80 = 0xA8
-    Wire.write(OUT_X_L | 0x80); // Start reading at OUT_X_L and automatically increment
-    Wire.endTransmission(false);
-
-    // Request 6 bytes of data. The accelerometer will send the bytes from OUT_X_L and OUT_X_H
-    Wire.requestFrom(ACCEL_ADDRESS, 6);
-
-    if (Wire.available() == 6)
-    {
-        // Read the two bytes from X
-        uint8_t x_low = Wire.read();
-        uint8_t x_high = Wire.read();
-        // Combine them into a 16-bit signed integer
-        // The LIS2DH12 uses little-endian format (low byte first)
-        raw_x = (x_high << 8) | x_low;
-
-        // two bytes from Y
-        uint8_t y_low = Wire.read();
-        uint8_t y_high = Wire.read();
-        raw_y = (y_high << 8) | y_low;
-
-        // two bytes from Z
-        uint8_t z_low = Wire.read();
-        uint8_t z_high = Wire.read();
-        raw_z = (z_high << 8) | z_low;
     }
 }
 
