@@ -67,7 +67,7 @@ static int readFromAccel(int16_t &raw_x, int16_t &raw_y, int16_t &raw_z)
 
         return 0;
     } else {
-      return -1
+      return -1;
     }
 }
 
@@ -155,7 +155,7 @@ void handleAccelError(int errorCode, uint8_t status) {
       Serial.println("Check: I2C connection, device power, pull-up resistors");
       break;
 
-    ase ACCEL_CTRL_REG2_FAILED:
+    case ACCEL_CTRL_REG2_FAILED:
       Serial.println("ERROR: Failed to write CTRL_REG2 (high pass filter)");
       printI2CStatus(status);
       Serial.println("Check: I2C connection, device power, pull-up resistors");

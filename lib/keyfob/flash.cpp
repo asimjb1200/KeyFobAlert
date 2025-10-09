@@ -1,6 +1,6 @@
-#include <flash.h>
 #include <Arduino.h>
 #include <SPI.h>
+#include <flash.h>
 
 #define FLASH_READ_STATUS_CMD 0x05
 
