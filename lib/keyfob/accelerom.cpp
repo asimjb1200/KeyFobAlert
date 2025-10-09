@@ -100,7 +100,7 @@ static void determineEvent()
      * In free fall, the sum of the squares of the acceleration components 
      * (x² + y² + z²) should be much less than 1 g²
      */
-    if (magnitude < 0.3 && magnitude) { 
+    if (magnitude < 0.3 && magnitude > 0) { 
         free_fall_detected = true;
     } else {
         free_fall_detected = false;
