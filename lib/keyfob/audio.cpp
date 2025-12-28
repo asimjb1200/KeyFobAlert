@@ -8,7 +8,7 @@
 #define SAMPLE_RATE_HZ 44100UL // 44.1 kHz
 #define AUDIO_DATA_START 0x000000
 #define AUDIO_DATA_SIZE (1024 * 1024)
-#define AUDIO_DATA_END (AUDIO_DATA_START + AUDIO_DATA_SIZE - 1) // 0x0FFFFF
+#define AUDIO_DATA_END (AUDIO_DATA_START + AUDIO_DATA_SIZE) // 0x0FFFFF
 #define AUDIO_BUFFER_SIZE 128
 #define F_CPU 20000000UL       // 20 MHz
 
@@ -78,35 +78,95 @@ static void swapBuffers()
     }
 }
 
-static void loadAudioBuffer(uint8_t *buffer, uint16_t size)
+static void loadAudioBuffer(uint8_t *buffer, uint8_t size)
 {
     // Check if we would go past end of audio file
     if (current_flash_address + size > AUDIO_DATA_END)
     {
         // Loop back to beginning of audio
+        uint32_t bytes_safe_to_add = AUDIO_DATA_END - current_flash_address;
+        uint32_t bytes_to_wrap = size - bytes_safe_to_add;
+
+        waitForFlashReady(); 
+
+        digitalWrite(FLASH_CS_PIN, LOW);
+
+        // Send READ command + address
+        SPI.transfer(FLASH_READ_CMD);
+        SPI.transfer((current_flash_address >> 16) & 0xFF);
+        SPI.transfer((current_flash_address >> 8) & 0xFF);
+        SPI.transfer(current_flash_address & 0xFF);
+
+        // Read audio data into buffer
+        for (uint32_t i = 0; i < bytes_safe_to_add; i++)
+        {
+            // i can only have values up to 143 in each byte to keep the speaker safe
+            /**
+             * Scale the entire audio file down so that its absolute 
+             * peak value is 143 (or 140 for a safer margin)
+             */
+            buffer[i] = SPI.transfer(0x00);
+        }
+
+        digitalWrite(FLASH_CS_PIN, HIGH);
+
+        // start from beg. so I can read the bytes that went over the memory location. this creates a continuous sound without missing mem locations
         current_flash_address = AUDIO_DATA_START;
+
+        waitForFlashReady(); 
+
+        digitalWrite(FLASH_CS_PIN, LOW);
+
+        // Send READ command + address
+        SPI.transfer(FLASH_READ_CMD);
+        SPI.transfer((current_flash_address >> 16) & 0xFF);
+        SPI.transfer((current_flash_address >> 8) & 0xFF);
+        SPI.transfer(current_flash_address & 0xFF);
+
+        // Read audio data into buffer
+        for (uint32_t i = 0; i < bytes_to_wrap; i++)
+        {
+            // i can only have values up to 143 in each byte to keep the speaker safe
+            /**
+             * Scale the entire audio file down so that its absolute 
+             * peak value is 143 (or 140 for a safer margin)
+             */
+            buffer[bytes_safe_to_add + i] = SPI.transfer(0x00);
+        }
+
+        digitalWrite(FLASH_CS_PIN, HIGH);
+
+        current_flash_address = AUDIO_DATA_START + bytes_to_wrap;
+
     }
-
-    waitForFlashReady(); 
-
-    digitalWrite(FLASH_CS_PIN, LOW);
-
-    // Send READ command + address
-    SPI.transfer(FLASH_READ_CMD);
-    SPI.transfer((current_flash_address >> 16) & 0xFF);
-    SPI.transfer((current_flash_address >> 8) & 0xFF);
-    SPI.transfer(current_flash_address & 0xFF);
-
-    // Read audio data into buffer
-    for (uint16_t i = 0; i < size; i++)
+    else // normal operation 
     {
-        buffer[i] = SPI.transfer(0x00);
+        waitForFlashReady(); 
+
+        digitalWrite(FLASH_CS_PIN, LOW);
+
+        // Send READ command + address
+        SPI.transfer(FLASH_READ_CMD);
+        SPI.transfer((current_flash_address >> 16) & 0xFF);
+        SPI.transfer((current_flash_address >> 8) & 0xFF);
+        SPI.transfer(current_flash_address & 0xFF);
+
+        // Read audio data into buffer
+        for (uint8_t i = 0; i < size; i++)
+        {
+            // i can only have values up to 143 in each byte to keep the speaker safe
+            /**
+             * Scale the entire audio file down so that its absolute 
+             * peak value is 143 (or 140 for a safer margin)
+             */
+            buffer[i] = SPI.transfer(0x00);
+        }
+
+        digitalWrite(FLASH_CS_PIN, HIGH);
+
+        // Update flash address for next read
+        current_flash_address += size;
     }
-
-    digitalWrite(FLASH_CS_PIN, HIGH);
-
-    // Update flash address for next read
-    current_flash_address += size;
 }
 
 void setupAudioInterruptTimer()
