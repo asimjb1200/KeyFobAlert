@@ -12,7 +12,24 @@ bool setupFlash()
     digitalWrite(FLASH_CS_PIN, HIGH); // CS idle high
     // Initialize the SPI bus
     SPI.begin();
-    return true;
+    return verifyFlashChip();
+}
+
+bool verifyFlashChip() {
+    digitalWrite(FLASH_CS_PIN, LOW);
+    SPI.transfer(0x9F);
+    uint8_t manufacturerID = SPI.transfer(0x00); // Should be 0xC2 for Macronix
+    uint8_t memoryType = SPI.transfer(0x00);     // Should be 0x20
+    uint8_t memorySize = SPI.transfer(0x00);     // Should be 0x15
+    digitalWrite(FLASH_CS_PIN, HIGH);
+
+    if (manufacturerID != 0xC2) {
+        Serial.println("ERROR: Flash chip not found or level shifter disconnected!");
+        return false;
+    } else {
+        Serial.println("Flash chip verified");
+        return true;
+    }
 }
 
 bool isFlashBusy()

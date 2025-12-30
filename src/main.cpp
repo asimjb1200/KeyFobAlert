@@ -13,14 +13,17 @@ void setup()
   uint8_t status;
   sei(); // Enable global interrupts. all interrupts are 0 level by default on this chip
   bool flashSetup = setupFlash();
+  if (flashSetup == false)
+  {
+    while (1);
+  }
   setupAudioInterruptTimer();
   accelInterruptPinSetup();
   status = accelRegisterConfig();
   if (status != AccelConfigError::ACCEL_SUCCESS) {
-    while(1) {
-      // Halt execution
-      delay(1000);
-    }
+    Serial.print("Problem with accel config. Status code: ");
+    Serial.println(status);
+    while(1);
   }
   // SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   // 8MHz clock, MSB first, Mode 0 (CPOL=0, CPHA=0)

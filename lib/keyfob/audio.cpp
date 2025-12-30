@@ -92,6 +92,8 @@ static void loadAudioBuffer(uint8_t *buffer, uint8_t size)
         digitalWrite(FLASH_CS_PIN, LOW);
 
         // Send READ command + address
+        // Serial.print("Size of 0xFF: "); proving that the bit mask is promoted to 32bits
+        // Serial.println(sizeof(0xFF));
         SPI.transfer(FLASH_READ_CMD);
         SPI.transfer((current_flash_address >> 16) & 0xFF);
         SPI.transfer((current_flash_address >> 8) & 0xFF);
@@ -208,6 +210,9 @@ ISR(TCA0_OVF_vect)
     uint8_t *buffer_in_use = getCurrentAudioBuffer();
 
     // Get the next audio sample from the active buffer
+    /**
+     * remember, i can only have values up to 143 in each byte. anything over will deliver an unsafe wattage
+     */
     uint8_t next_audio_sample = buffer_in_use[current_sample_index];
 
     // Output it to the DAC

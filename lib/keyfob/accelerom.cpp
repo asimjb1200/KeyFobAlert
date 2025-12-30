@@ -80,7 +80,9 @@ static void determineEvent()
     int16_t raw_x, raw_y, raw_z;
     status = readFromAccel(raw_x, raw_y, raw_z);
     if (status != 0) {
-
+      Serial.print("bad read from accel. Status code: ");
+      Serial.println(status);
+      while(1);
     }
 
     // make sense of the readings to distinguish between free fall and impact based on g force
