@@ -1,52 +1,84 @@
-#include <Arduino.h>
-#include <SPI.h>
 #include <flash.h>
+#include <SPI.h>
+#include <EEPROM.h>
 
-#define FLASH_READ_STATUS_CMD 0x05
+#define READ_CMD 0x03
+#define FLASH_RDSR 0x05 // Read Status Register
+#define PWR_DWN_CMD 0xB9
+#define WAKE_UP_CMD 0xAB
 
-#define FLASH_SIZE_BYTES 0x200000
+uint32_t lastMemoryAddress = 0;
+static uint32_t eeLastMemoryAddress = 0;
+static const uint32_t fileSize = 134387;
 
-bool setupFlash()
-{
-    pinMode(FLASH_CS_PIN, OUTPUT);
-    digitalWrite(FLASH_CS_PIN, HIGH); // CS idle high
-    // Initialize the SPI bus
-    SPI.begin();
-    return verifyFlashChip();
+void waitForFlashReady() {
+    uint8_t status = 0;
+    do {
+        digitalWrite(CS_PIN, LOW);
+        SPI.transfer(FLASH_RDSR);          // Read Status Register command
+        status = SPI.transfer(0x00); // Shift out the register value
+        digitalWrite(CS_PIN, HIGH);
+    } while (status & 0x01);         // Mask for Bit 0 (WIP)
 }
 
-bool verifyFlashChip() {
-    digitalWrite(FLASH_CS_PIN, LOW);
-    SPI.transfer(0x9F);
-    uint8_t manufacturerID = SPI.transfer(0x00); // Should be 0xC2 for Macronix
-    uint8_t memoryType = SPI.transfer(0x00);     // Should be 0x20
-    uint8_t memorySize = SPI.transfer(0x00);     // Should be 0x15
-    digitalWrite(FLASH_CS_PIN, HIGH);
+void readFlash(uint32_t address, uint16_t size, uint8_t* buffer) {
+    waitForFlashReady();
 
-    if (manufacturerID != 0xC2) {
-        Serial.println("ERROR: Flash chip not found or level shifter disconnected!");
-        return false;
-    } else {
-        Serial.println("Flash chip verified");
-        return true;
+    digitalWrite(CS_PIN, LOW);
+    
+    SPI.transfer(READ_CMD); 
+    
+    // Send 24-bit Address
+    SPI.transfer((address >> 16) & 0xFF);
+    SPI.transfer((address >> 8) & 0xFF);
+    SPI.transfer(address & 0xFF);
+
+    for (uint16_t i = 0; i < size; i++) {
+        uint8_t dataByte = SPI.transfer(0x00); // Send in order to get real data
+        
+        buffer[i] = dataByte;
     }
+    
+    digitalWrite(CS_PIN, HIGH);
 }
 
-bool isFlashBusy()
-{
-    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
-    digitalWrite(FLASH_CS_PIN, LOW);
-    SPI.transfer(FLASH_READ_STATUS_CMD);
-    uint8_t status = SPI.transfer(0x00); // Read status register
-    digitalWrite(FLASH_CS_PIN, HIGH);    // stop communication
-    SPI.endTransaction();
-    return (status & 0x01); // Busy bit is bit 0
+void readLastMemoryAddress() {
+    EEPROM.get(eeLastMemoryAddress, lastMemoryAddress);
 }
 
-void waitForFlashReady()
-{
-    while (isFlashBusy())
-    {
-        delay(1); 
+void saveLastMemoryAddress() {
+    EEPROM.put(eeLastMemoryAddress, lastMemoryAddress);
+}
+
+void readNextDataChunk(uint16_t size, uint8_t* buffer) {
+    if (lastMemoryAddress >= fileSize) {
+        // End of file reached
+        lastMemoryAddress = 0;
+        saveLastMemoryAddress();
+        return;
     }
+    
+    uint16_t bytesToRead = (lastMemoryAddress + size > fileSize) ? (fileSize - lastMemoryAddress) : size;
+    
+    readFlash(lastMemoryAddress, bytesToRead, buffer);
+    
+    lastMemoryAddress += bytesToRead;
+    saveLastMemoryAddress();
+    
+    return;
+}
+
+void deepSleepFlash() {
+    waitForFlashReady();
+
+    digitalWrite(CS_PIN, LOW);
+    SPI.transfer(PWR_DWN_CMD);
+    digitalWrite(CS_PIN, HIGH);
+}
+
+void wakeUpFlash() {
+    digitalWrite(CS_PIN, LOW);
+    SPI.transfer(WAKE_UP_CMD);
+    digitalWrite(CS_PIN, HIGH);
+    delayMicroseconds(10);
 }

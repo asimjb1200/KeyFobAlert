@@ -1,285 +1,101 @@
 #include <Arduino.h>
 #include <audio.h>
-#include <SPI.h>
-#include <avr/interrupt.h>
+#include <util/delay.h>
 #include <flash.h>
 
 #define TIMER_PERIPHERAL TCA0
-#define SAMPLE_RATE_HZ 44100UL // 44.1 kHz
-#define AUDIO_DATA_START 0x000000
-#define AUDIO_DATA_SIZE (1024 * 1024)
-#define AUDIO_DATA_END (AUDIO_DATA_START + AUDIO_DATA_SIZE) // 0x0FFFFF
-#define AUDIO_BUFFER_SIZE 128
-#define F_CPU 20000000UL       // 20 MHz
+#define SAMPLE_RATE 44100
+#define AUDIO_BUFFER_SIZE 256
 
+static constexpr int CLK_FREQ = 20'000'000;
+uint8_t audioBufferOne[AUDIO_BUFFER_SIZE];
+uint8_t audioBufferTwo[AUDIO_BUFFER_SIZE];
 
-volatile uint8_t current_sample_index = 0;
-volatile bool buffer_A_needs_refill = false;
-volatile bool buffer_B_needs_refill = false;
-volatile bool using_buffer_A = true;
-volatile bool audio_playing = false;
-volatile bool request_audio_stop = false;
+volatile uint16_t bytesSent = 0;
 
-// start reading from the very beginning of flash memory.
-static uint32_t current_flash_address = AUDIO_DATA_START; // Track position in flash
+volatile bool usingBufferOne = true;
+volatile bool bufferOneNeedsFill = true;
+volatile bool bufferTwoNeedsFill = true;
 
-// Double buffer setup
-static uint8_t audio_buffer_A[AUDIO_BUFFER_SIZE];
-static uint8_t audio_buffer_B[AUDIO_BUFFER_SIZE];
-
-static void initializeDAC()
+void setupDAC()
 {
-    // set the voltage range
-    VREF.CTRLA = VREF_DAC0REFSEL_2V5_gc;
+    // select 4.3V reference
+    VREF_CTRLA |= VREF_DAC0REFSEL_4V34_gc;
+    /* DAC0/AC0 reference enable: enabled */
+    VREF.CTRLB |= VREF_DAC0REFEN_bm;
 
-    // enable the DAC for outputting voltage thru DAC pin
-    DAC0.CTRLA = DAC_OUTEN_bm | DAC_ENABLE_bm;
+    /* Disable digital input buffer */
+    PORTA.PIN6CTRL &= ~PORT_ISC_gm;
+    PORTA.PIN6CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+    /* Disable pull-up resistor */
+    PORTA.PIN6CTRL &= ~PORT_PULLUPEN_bm;
+    /* Enable DAC, Output Buffer, Run in Standby */
+    DAC0.CTRLA = DAC_ENABLE_bm | DAC_OUTEN_bm | DAC_RUNSTDBY_bm;
 
-    // set initial data value
-    DAC0.DATA = 128;
+    // 25 μs delay is recommended after enabling the VREF
+    _delay_us(25);
+
+    // the DAC is now ready for conversions
+    DAC0.DATA = 0x20;
 }
 
-static uint8_t *getCurrentAudioBuffer()
-{
-    if (using_buffer_A && !buffer_A_needs_refill)
-    {
-        return audio_buffer_A;
-    }
-    else if (!using_buffer_A && !buffer_B_needs_refill)
-    {
-        return audio_buffer_B;
-    }
-    else
-    {
-        // Buffer not ready, return a safe fallback (e.g., silence)
-        static uint8_t silence_buffer[AUDIO_BUFFER_SIZE] = {0};
-        return silence_buffer;
-    }
+static void setupStopAudioPin() {
+    // Set pin PA5 to input
+    PORTA.DIRCLR |= PIN5_bm;
+
+    // set the internal pull up AND set level detection sensing
+    PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PIN_ISC_LEVEL;
 }
 
-// This would be called when current buffer is nearly empty
-static void swapBuffers()
+/**disable the counter and the interrupt from the periodic timer */
+void disableHardwareTimer()
 {
-    if (using_buffer_A)
-    {
-        // Switch to buffer B, reload buffer A in background
-        noInterrupts();
-        using_buffer_A = false;
-        buffer_A_needs_refill = true;
-        interrupts();
-    }
-    else
-    {
-        // Switch to buffer A, reload buffer B in background
-        noInterrupts();
-        using_buffer_A = true;
-        buffer_B_needs_refill = true;
-        interrupts();
-    }
+    TCB0_CTRLA &= ~TCB_ENABLE_bm;
+    TCB0.INTCTRL &= ~TCB_CAPT_bm;
 }
 
-static void loadAudioBuffer(uint8_t *buffer, uint8_t size)
+void enableHardwareTimer()
 {
-    // Check if we would go past end of audio file
-    if (current_flash_address + size > AUDIO_DATA_END)
-    {
-        // Loop back to beginning of audio
-        uint32_t bytes_safe_to_add = AUDIO_DATA_END - current_flash_address;
-        uint32_t bytes_to_wrap = size - bytes_safe_to_add;
-
-        waitForFlashReady(); 
-
-        digitalWrite(FLASH_CS_PIN, LOW);
-
-        // Send READ command + address
-        // Serial.print("Size of 0xFF: "); proving that the bit mask is promoted to 32bits
-        // Serial.println(sizeof(0xFF));
-        SPI.transfer(FLASH_READ_CMD);
-        SPI.transfer((current_flash_address >> 16) & 0xFF);
-        SPI.transfer((current_flash_address >> 8) & 0xFF);
-        SPI.transfer(current_flash_address & 0xFF);
-
-        // Read audio data into buffer
-        for (uint32_t i = 0; i < bytes_safe_to_add; i++)
-        {
-            // i can only have values up to 143 in each byte to keep the speaker safe
-            /**
-             * Scale the entire audio file down so that its absolute 
-             * peak value is 143 (or 140 for a safer margin)
-             */
-            buffer[i] = SPI.transfer(0x00);
-        }
-
-        digitalWrite(FLASH_CS_PIN, HIGH);
-
-        // start from beg. so I can read the bytes that went over the memory location. this creates a continuous sound without missing mem locations
-        current_flash_address = AUDIO_DATA_START;
-
-        waitForFlashReady(); 
-
-        digitalWrite(FLASH_CS_PIN, LOW);
-
-        // Send READ command + address
-        SPI.transfer(FLASH_READ_CMD);
-        SPI.transfer((current_flash_address >> 16) & 0xFF);
-        SPI.transfer((current_flash_address >> 8) & 0xFF);
-        SPI.transfer(current_flash_address & 0xFF);
-
-        // Read audio data into buffer
-        for (uint32_t i = 0; i < bytes_to_wrap; i++)
-        {
-            // i can only have values up to 143 in each byte to keep the speaker safe
-            /**
-             * Scale the entire audio file down so that its absolute 
-             * peak value is 143 (or 140 for a safer margin)
-             */
-            buffer[bytes_safe_to_add + i] = SPI.transfer(0x00);
-        }
-
-        digitalWrite(FLASH_CS_PIN, HIGH);
-
-        current_flash_address = AUDIO_DATA_START + bytes_to_wrap;
-
-    }
-    else // normal operation 
-    {
-        waitForFlashReady(); 
-
-        digitalWrite(FLASH_CS_PIN, LOW);
-
-        // Send READ command + address
-        SPI.transfer(FLASH_READ_CMD);
-        SPI.transfer((current_flash_address >> 16) & 0xFF);
-        SPI.transfer((current_flash_address >> 8) & 0xFF);
-        SPI.transfer(current_flash_address & 0xFF);
-
-        // Read audio data into buffer
-        for (uint8_t i = 0; i < size; i++)
-        {
-            // i can only have values up to 143 in each byte to keep the speaker safe
-            /**
-             * Scale the entire audio file down so that its absolute 
-             * peak value is 143 (or 140 for a safer margin)
-             */
-            buffer[i] = SPI.transfer(0x00);
-        }
-
-        digitalWrite(FLASH_CS_PIN, HIGH);
-
-        // Update flash address for next read
-        current_flash_address += size;
-    }
-}
-
-void setupAudioInterruptTimer()
-{
-    initializeDAC();
-    
-    uint16_t interruptPeriod = (F_CPU / (1 * SAMPLE_RATE_HZ)) - 1;
-
-    // Configure TCA0 for normal operation and set the period (TOP)
-    // TCA0.SINGLE.CTRLA: Control A register for TCA0 (Single mode)
-    // CLKSEL_DIV1_gc: No prescaling (20 MHz clock directly)
-    // ENABLE_bm: Enable the TCA0 peripheral
-    TIMER_PERIPHERAL.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc | TCA_SINGLE_ENABLE_bm;
-    TIMER_PERIPHERAL.SINGLE.PER = interruptPeriod;
-
-    loadAudioBuffer(audio_buffer_A, AUDIO_BUFFER_SIZE);
-    loadAudioBuffer(audio_buffer_B, AUDIO_BUFFER_SIZE);
-}
-
-void stopAudioSwitchInterruptSetup()
-{
-    // set pin PA5 as input
-    PORTA.DIRCLR = PIN5_bm; // 0b0010 0000
-
-    /*
-    * Enable the internal pull-up resistor and set interrupt to trigger on a falling edge
-    * since pressing the switch will pull the line low
-    */ 
-    PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PORT_ISC_FALLING_gc;
-    PORTA.INTFLAGS = PIN5_bm;// clear any stale flags
-}
-
-/*
-interrupt vector for the Timer/Counter Type A (TCA)
-used to trigger an action every time the timer reaches its maximum count and "overflows" to zero
-*/ 
-ISR(TCA0_OVF_vect)
-{
-    uint8_t *buffer_in_use = getCurrentAudioBuffer();
-
-    // Get the next audio sample from the active buffer
     /**
-     * remember, i can only have values up to 143 in each byte. anything over will deliver an unsafe wattage
+     * Enable the counter by writing a ‘1’ to the ENABLE bit in the Control A (TCBn.CTRLA) register.
+     * The counter will start counting clock ticks according to the prescaler setting in the Clock Select (CLKSEL) bit
+     * field in the Control A (TCBn.CTRLA) register.
      */
-    uint8_t next_audio_sample = buffer_in_use[current_sample_index];
+    TCB0_CTRLA |= TCB_ENABLE_bm;
 
-    // Output it to the DAC
-    DAC0.DATA = next_audio_sample;
-
-    // Increment playback index
-    current_sample_index++;
-
-    // Check for buffer end and flip active buffer flag
-    if (current_sample_index == AUDIO_BUFFER_SIZE)
-    {
-        // Signal main loop to fill the other buffer
-        swapBuffers();
-        current_sample_index = 0;
-    }
-
-    // Clear the interrupt flag:
-    TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
+    // enables the interrupt from my timer
+    TCB0.INTCTRL = TCB_CAPT_bm;
 }
 
-/**
- * interrupt vector for the pins on port A
- * will be used to detect the switch that is intended to cut audio
+/** using the periodic timer to set up the intervals that are needed to sample the audio for playback.
+ * i.e. setting up how long to wait in between voltage samples. must match the sample rate the audio was recorded in
  */
-ISR(PORTA_PORT_vect) {
-    // Check if the interrupt came from my switch
-    if (PORTA.INTFLAGS & PIN5_bm) {
-        PORTA.INTFLAGS = PIN5_bm; // Clear the interrupt flag for PA5
-
-        request_audio_stop = true;
-    }
-}
-
-void checkAndFillEmptyAudioBuffer()
+void initHardwareTimer()
 {
-    if (buffer_B_needs_refill && using_buffer_A)
-    {
-        loadAudioBuffer(audio_buffer_B, AUDIO_BUFFER_SIZE);
+    // set interrupt mode to periodic
+    TCB0.CTRLB = TCB_CNTMODE_INT_gc;
 
-        noInterrupts();
-        buffer_B_needs_refill = false;
-        interrupts();
-    }
-    else if (buffer_A_needs_refill && !using_buffer_A)
-    {
-        loadAudioBuffer(audio_buffer_A, AUDIO_BUFFER_SIZE);
+    /**
+     * Write a TOP value to the Compare/Capture register.
+     * aka number of clock ticks, from 0, that will trigger an interrupt
+     * using the TOP formula defined here: TOP = (CPU clock freq./SampleRate) - 1
+     * that gives us - (CLK_FREQ / SAMPLE_RATE) - 1 = 452
+     * so count 452 clock cycles then fire an interrupt
+     */
+    TCB0.CCMP = 452;
 
-        noInterrupts();
-        buffer_A_needs_refill = false;
-        interrupts();
-    }
+    enableHardwareTimer();
 }
 
-void pauseAudio() {
-    // Disable the timer interrupt that drives audio playback
-    TIMER_PERIPHERAL.SINGLE.INTCTRL &= ~TCA_SINGLE_OVF_bm; // Disable overflow interrupt
+void fillBuffer()
+{
+    if (bufferOneNeedsFill) {
+        readNextDataChunk(AUDIO_BUFFER_SIZE, audioBufferOne);
+        bufferOneNeedsFill = false;
+    }
     
-    // Optional: Set DAC to mid-scale to avoid pop/click
-    DAC0.DATA = 128;  // 1.25V - silent level
-    audio_playing = false;
-    request_audio_stop = false;
-}
-
-void enableAudio() {
-    // Enable the overflow interrupt for TCA0
-    // TCA0.SINGLE.INTCTRL: Interrupt Control register for TCA0 (Single mode)
-    // OVF_bm: Overflow Interrupt Enable bit
-    TIMER_PERIPHERAL.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
-    audio_playing = true;
+    if (bufferTwoNeedsFill) {
+        readNextDataChunk(AUDIO_BUFFER_SIZE, audioBufferTwo);
+        bufferTwoNeedsFill = false;
+    }
 }

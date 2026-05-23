@@ -1,27 +1,19 @@
 #pragma once
-
 #include <stdint.h>
-#include <stdbool.h>
+#define DAC PIN_PA6
+#define STOP_AUDIO_PIN PIN_PA5
 
-// Buffer management variables
-extern volatile bool buffer_A_needs_refill;
-extern volatile bool buffer_B_needs_refill;
-extern volatile bool using_buffer_A;  // Which buffer DAC is currently using
-extern volatile bool audio_playing;
-extern volatile bool request_audio_stop;
+extern uint32_t lastMemoryAddress;
+extern volatile uint16_t bytesSent;
+extern volatile bool bufferOneNeedsFill;
+extern volatile bool bufferTwoNeedsFill;
+extern volatile bool usingBufferOne;
+extern uint8_t audioBufferOne[256];
+extern uint8_t audioBufferTwo[256];
 
-/**
- * @brief Checks if any buffers needs refilling and refills them if necessary
- */
-void checkAndFillEmptyAudioBuffer();
-
-/**
- * @brief configure the interrupt for sampling audio and pre fill the two buffers
- */
-void setupAudioInterruptTimer();
-void pauseAudio();
-/**
- * @brief Enable the overflow interrupt for TCA0, which is what allows the ISR
- * to run and feed audio data samples to the speaker, I.E. plays the audio
- */
-void enableAudio();
+void setupDAC();
+void enableHardwareTimer();
+void disableHardwareTimer();
+void initHardwareTimer();
+void fillBuffer();
+void stopAudio();

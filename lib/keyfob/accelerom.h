@@ -1,31 +1,15 @@
 #pragma once
-// LIS2DH12
 #include <stdint.h>
+#include <mcu_state.h>
 
-extern volatile bool free_fall_detected;
-//extern volatile bool impact_detected;
-enum AccelConfigError {
-  ACCEL_SUCCESS = 0,
-  ACCEL_CTRL_REG1_FAILED = -1,
-  ACCEL_CTRL_REG2_FAILED = -2,
-  ACCEL_CTRL_REG4_FAILED = -3,
-  ACCEL_CTRL_REG3_FAILED = -4,
-  ACCEL_INT1_THS_FAILED = -5,
-  ACCEL_INT1_DURATION_FAILED = -6,
-  ACCEL_INT1_CFG_FAILED = -7,
-  ACCEL_CTRL_REG5_FAILED = -8
-};
+#define ACCELEROMETER_ADDR 0x18
+#define SCL_PIN PIN_PB0 // PIN 9
+#define SDA_PIN PIN_PB1 // PIN 8
+#define WHO_AM_I_REGISTER_ACCEL 0x0F
+#define INT1_SRC_REGISTER 0x31
 
-/**
- * @brief set up the interrupt PIN for the LIS2DH12
- */
-void accelInterruptPinSetup();
-/**
- * @brief check for the free fall and impact events
- */
-void accelCheckForInterruptEvents();
-/**
- * @brief sets all of the necessary registers to get meaningful data from the LIS2DH12 and to choose what events will generate interrupts
- */
-int accelRegisterConfig();
-void deviceRecovered();
+uint8_t sendDataToRegister(uint8_t deviceAddress, uint8_t deviceRegister, uint8_t command);
+bool initFreeFallDetection();
+void initAccelInterruptPin();
+bool verifyAccelConnection();
+uint8_t readRegister(uint8_t deviceAddress, uint8_t deviceRegister);
