@@ -2,6 +2,31 @@
 #include <Wire.h>
 #include <accelerom.h>
 
+bool verifyAccelConnection() {
+  Wire.beginTransmission(ACCELEROMETER_ADDR);
+  Wire.write(WHO_AM_I_REGISTER_ACCEL);
+  uint8_t status = Wire.endTransmission(false);
+
+  if (status == 0) {
+    Serial.println("Slave sent an ACK");
+    Wire.requestFrom(ACCELEROMETER_ADDR, 1);
+    if (Wire.available()) {
+      uint8_t data = Wire.read();
+      Serial.print("WHO_AM_I: 0x");
+      Serial.println(data, HEX);
+      return true;
+    }
+  } else if (status == 2) {
+    Serial.println("Received NACK on transmit of address");
+  } else if (status == 3) {
+    Serial.println("Received NACK on transmit of data");
+  } else {
+    Serial.println("4: Line busy, etc.");
+  }
+  Serial.flush();
+  return false;
+}
+
 uint8_t sendDataToRegister(uint8_t deviceAddress, uint8_t deviceRegister, uint8_t command) {
   Wire.beginTransmission(deviceAddress);
   Wire.write(deviceRegister);
