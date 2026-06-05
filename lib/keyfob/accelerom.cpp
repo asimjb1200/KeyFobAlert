@@ -96,24 +96,3 @@ void initAccelInterruptPin() {
 
   PORTA.PIN4CTRL = PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
 }
-
-/**
- * interrupts from accelerometer will be coming in on this port due to
- * the int pin from the device being connected to a port b pin
- **/
-ISR(PORTA_PORT_vect)
-{
-
-    if (PORTA.INTFLAGS & PIN4_bm) {
-        PORTA.INTFLAGS &= ~PIN4_bm;
-
-        // Disable the interrupt
-        PORTA.PIN4CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-
-        // works better when I call it here..
-        //readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
-
-        mcu_state = FALL_DETECTED;
-    }
-}
