@@ -2,6 +2,7 @@
 #include <audio.h>
 #include <util/delay.h>
 #include <flash.h>
+#include <mcu_state.h>
 
 #define TIMER_PERIPHERAL TCA0
 #define SAMPLE_RATE 44100
@@ -39,12 +40,12 @@ void setupDAC()
     DAC0.DATA = 0x20;
 }
 
-static void setupStopAudioPin() {
+void setupStopAudioPin() {
     // Set pin PA5 to input
     PORTA.DIRCLR |= PIN5_bm;
 
     // set the internal pull up AND set level detection sensing
-    PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PIN_ISC_LEVEL;
+    PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
 }
 
 /**disable the counter and the interrupt from the periodic timer */
@@ -56,18 +57,20 @@ void disableHardwareTimer()
 
 void enableHardwareTimer()
 {
+    // enables the interrupt from my timer
+    TCB0.INTCTRL = TCB_CAPT_bm;
+
     /**
      * Enable the counter by writing a ‘1’ to the ENABLE bit in the Control A (TCBn.CTRLA) register.
      * The counter will start counting clock ticks according to the prescaler setting in the Clock Select (CLKSEL) bit
      * field in the Control A (TCBn.CTRLA) register.
      */
     TCB0_CTRLA |= TCB_ENABLE_bm;
-
-    // enables the interrupt from my timer
-    TCB0.INTCTRL = TCB_CAPT_bm;
 }
 
-/** using the periodic timer to set up the intervals that are needed to sample the audio for playback.
+/**
+ * By default the TCB is in Periodic Interrupt Mode 
+ * using the periodic timer to set up the intervals that are needed to sample the audio for playback.
  * i.e. setting up how long to wait in between voltage samples. must match the sample rate the audio was recorded in
  */
 void initHardwareTimer()
@@ -81,10 +84,19 @@ void initHardwareTimer()
      * using the TOP formula defined here: TOP = (CPU clock freq./SampleRate) - 1
      * that gives us - (CLK_FREQ / SAMPLE_RATE) - 1 = 452
      * so count 452 clock cycles then fire an interrupt
-     */
+    */
     TCB0.CCMP = 452;
 
-    enableHardwareTimer();
+    /**
+     * Enable the counter by writing a ‘1’ to the ENABLE bit in the Control A (TCBn.CTRLA) register.
+     * The counter will start counting clock ticks according to the prescaler setting in the Clock Select (CLKSEL) bit
+     * field in the Control A (TCBn.CTRLA) register.
+    */
+    //TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
+    TCB0_CTRLA |= TCB_ENABLE_bm;
+
+    // enables the interrupt from my timer
+    TCB0.INTCTRL = TCB_CAPT_bm;
 }
 
 void fillBuffer()
@@ -97,5 +109,27 @@ void fillBuffer()
     if (bufferTwoNeedsFill) {
         readNextDataChunk(AUDIO_BUFFER_SIZE, audioBufferTwo);
         bufferTwoNeedsFill = false;
+    }
+}
+
+ISR(TCB0_INT_vect){
+    TCB0.INTFLAGS = TCB_CAPT_bm; /* Clear the interrupt flag */
+    
+    if (mcu_state == MCU_State_t::AUDIO_PLAYING) 
+    {
+        uint8_t* currentBuffer = usingBufferOne ? audioBufferOne : audioBufferTwo;
+        
+        DAC0.DATA = currentBuffer[bytesSent++];
+
+        if (bytesSent >= 256) {
+            bytesSent = 0;
+            if (usingBufferOne) {
+                usingBufferOne = false;
+                bufferOneNeedsFill = true; // Signal the loop to refill Buffer 1
+            } else {
+                usingBufferOne = true;
+                bufferTwoNeedsFill = true; // Signal the loop to refill Buffer 2
+            }
+        }
     }
 }

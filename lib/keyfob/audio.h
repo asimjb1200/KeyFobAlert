@@ -17,3 +17,4 @@ void disableHardwareTimer();
 void initHardwareTimer();
 void fillBuffer();
 void stopAudio();
+void setupStopAudioPin();

@@ -77,8 +77,6 @@ bool initFreeFallDetection() {
   status = sendDataToRegister(ACCELEROMETER_ADDR, int1_cfg_reg, 0x95);
   if (status != 0) { Serial.print("INT1_CFG failed, status: "); Serial.println(status); return false; }
 
-  // Serial.println("Free fall detection initialized successfully");
-  //Serial.flush();
   return true;
 }
 
