@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #define DAC PIN_PA6
-#define STOP_AUDIO_PIN PIN_PA5
+#define AUDIO_BTN_PRESSED (!(PORTA.IN & PIN5_bm))
 
 extern uint32_t lastMemoryAddress;
 extern volatile uint16_t bytesSent;
@@ -16,5 +16,4 @@ void enableHardwareTimer();
 void disableHardwareTimer();
 void initHardwareTimer();
 void fillBuffer();
-void stopAudio();
 void setupStopAudioPin();

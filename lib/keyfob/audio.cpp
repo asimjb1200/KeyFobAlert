@@ -25,6 +25,9 @@ void setupDAC()
     /* DAC0/AC0 reference enable: enabled */
     VREF.CTRLB |= VREF_DAC0REFEN_bm;
 
+    // 25 μs delay is recommended after enabling the VREF
+    _delay_us(25);
+
     /* Disable digital input buffer */
     PORTA.PIN6CTRL &= ~PORT_ISC_gm;
     PORTA.PIN6CTRL |= PORT_ISC_INPUT_DISABLE_gc;
@@ -33,19 +36,15 @@ void setupDAC()
     /* Enable DAC, Output Buffer, Run in Standby */
     DAC0.CTRLA = DAC_ENABLE_bm | DAC_OUTEN_bm | DAC_RUNSTDBY_bm;
 
-    // 25 μs delay is recommended after enabling the VREF
-    _delay_us(25);
-
     // the DAC is now ready for conversions
     DAC0.DATA = 0x20;
 }
 
 void setupStopAudioPin() {
     // Set pin PA5 to input
-    PORTA.DIRCLR |= PIN5_bm;
+    PORTA.DIRCLR = PIN5_bm;
 
-    // set the internal pull up AND set level detection sensing
-    PORTA.PIN5CTRL = PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
+    PORTA.PIN5CTRL |= PORT_PULLUPEN_bm;
 }
 
 /**disable the counter and the interrupt from the periodic timer */
@@ -75,9 +74,6 @@ void enableHardwareTimer()
  */
 void initHardwareTimer()
 {
-    // set interrupt mode to periodic
-    TCB0.CTRLB = TCB_CNTMODE_INT_gc;
-
     /**
      * Write a TOP value to the Compare/Capture register.
      * aka number of clock ticks, from 0, that will trigger an interrupt
@@ -92,8 +88,7 @@ void initHardwareTimer()
      * The counter will start counting clock ticks according to the prescaler setting in the Clock Select (CLKSEL) bit
      * field in the Control A (TCBn.CTRLA) register.
     */
-    //TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
-    TCB0_CTRLA |= TCB_ENABLE_bm;
+    TCB0_CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
 
     // enables the interrupt from my timer
     TCB0.INTCTRL = TCB_CAPT_bm;

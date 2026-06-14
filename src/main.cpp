@@ -6,8 +6,13 @@
 #include <audio.h>
 #include <flash.h>
 #include <SPI.h>
+#include <avr/io.h>
+extern "C" {
+    #include <avr/cpufunc.h>
+}
 
-volatile MCU_State_t mcu_state = RESTING;
+
+volatile MCU_State_t mcu_state = DEVICE_RECOVERED; 
 
 void scanBusForDevices() {
   for (uint8_t addr = 1; addr < 127; addr++) {
@@ -37,15 +42,16 @@ void checkMCUAndAccelConnections() {
 void initMCUClock() 
 {
   // disable prescaler
-  CPU_CCP = CCP_IOREG_gc;
-  CLKCTRL.MCLKCTRLB = 0;
+  ccp_write_io((uint8_t*)&CLKCTRL.MCLKCTRLB, 0x00);
 
   // selects the source for the Main Clock (internal crystal)
-  CPU_CCP = CCP_IOREG_gc;
-  CLKCTRL.MCLKCTRLA = CLKCTRL_CLKSEL_OSC20M_gc;
+  ccp_write_io((uint8_t*)&CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_OSC20M_gc);
+  
 
   // give time for clock to switch if necessary
-  while (CLKCTRL.MCLKSTATUS & CLKCTRL_SOSC_bm){}
+  while (!(CLKCTRL.MCLKSTATUS & CLKCTRL_OSC20MS_bm)) {
+        // Do nothing until the 20MHz oscillator is fully stable
+  }
 }
 
 void setup() {
@@ -55,6 +61,24 @@ void setup() {
 
   delay(10000);
 
+  // initialize the CS pin for usage with SPI
+  pinMode(CS_PIN, OUTPUT);
+  digitalWrite(CS_PIN, HIGH);
+
+  SPI.begin();
+
+  delay(100);
+
+
+    // start audio data from the beginning
+  lastMemoryAddress = 0;
+  Serial.println("buff fill start");
+  Serial.flush();
+  fillBuffer(); // get audio data ready
+  Serial.print("buff fill end. last memory address: ");Serial.println(lastMemoryAddress);
+  Serial.flush();
+
+
   delay(100);
   Serial.println("int pin start");
   Serial.flush();
@@ -62,12 +86,6 @@ void setup() {
   Serial.println("int pin done");
   Serial.flush();
   delay(100);
-
-  Serial.println("stop audio start");
-  Serial.flush();
-  setupStopAudioPin();
-  Serial.println("stop audio end");
-  Serial.flush();
 
   Serial.println("DAC init begin");
   Serial.flush();
@@ -81,32 +99,21 @@ void setup() {
   initHardwareTimer();
   Serial.println("Timer set up complete");
   Serial.flush();
-  delay(100);
 
+  Serial.println("stop audio start");
+  Serial.flush();
+  setupStopAudioPin();
+  Serial.println("stop audio end");
+  Serial.flush();
+  
   Wire.begin();
   delay(100);
-  
-  //delay(10000);
+
   
   //checkMCUAndAccelConnections();
 
-  // initialize the CS pin for usage with SPI
-  pinMode(CS_PIN, OUTPUT);
-  digitalWrite(CS_PIN, HIGH);
-
-  SPI.begin();
-
-  delay(100);
   // checkFlashConnection();
   // getFlashElectronicInfo();
-
-  // start audio data from the beginning
-  lastMemoryAddress = 0;
-  Serial.println("buff fill start");
-  Serial.flush();
-  fillBuffer(); // get audio data ready
-  Serial.println("buff fill end");
-  Serial.flush();
   
   Serial.println("free fall init started");
   Serial.flush();
@@ -115,39 +122,39 @@ void setup() {
   Serial.flush();
   delay(100);
 
-  if (accelSetUp) {
-    sei();
+  // if (accelSetUp) {
 
     // select which sleep mode to enter and enable the sleep controller
-    set_sleep_mode(SLEEP_MODE_STANDBY);
-  } else {
-     Serial.println("set up failed");
-  }
+  //   set_sleep_mode(SLEEP_MODE_STANDBY);
+  // } else {
+  //    Serial.println("set up failed");
+  // }
 }
 
 void loop()
 {
-  Serial.println("Sleep Mode");
-  Serial.flush();
 
-  if (mcu_state == MCU_State_t::RESTING)
-  {
-    sleep_mode();
-  }
+  // Serial.println("Sleep Mode");
+  // Serial.flush();
+
+  // if (mcu_state == MCU_State_t::RESTING)
+  // {
+  //   sleep_mode();
+  // }
 
   // small delay to allow the full fall to take place
   //delay(2000);
 
-  switch (mcu_state)
-  {
-    case RESTING:
-      Serial.println("Resting State");
-      Serial.flush();
-      break;
+  // switch (mcu_state)
+  // {
+  //   case RESTING:
+  //     Serial.println("Resting State");
+  //     Serial.flush();
+  //     break;
 
-    case FALL_DETECTED:
-      Serial.println("Fall Detected");
-      Serial.flush();
+  //   case FALL_DETECTED:
+  //     Serial.println("Fall Detected");
+  //     Serial.flush();
       // clear the interrupt & play audio
       //readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
 
@@ -155,20 +162,43 @@ void loop()
 
       // enable the periodic timer for audio playback
       //enableHardwareTimer();
-      mcu_state = AUDIO_PLAYING;
-      break;
+      // mcu_state = AUDIO_PLAYING;
+      // break;
     
-    case AUDIO_PLAYING:
+    // case AUDIO_PLAYING:
       if (bufferOneNeedsFill || bufferTwoNeedsFill)
       {
+        noInterrupts();
         fillBuffer();
+        sei();
       }
 
-      break;
+      // Check if stop audio button was pressed (PA5 Pulled to GND)
+      if (AUDIO_BTN_PRESSED) {
+        delay(30);
+        if (AUDIO_BTN_PRESSED) {
+          while (AUDIO_BTN_PRESSED) /* wait until PA5 is pulled to VDD */
+          {}
+          
+          //Serial.println("btn pressed");Serial.flush();
+
+          noInterrupts();
+          if (mcu_state == ::AUDIO_PLAYING) {
+            mcu_state = DEVICE_RECOVERED;
+          }
+          else {
+            mcu_state = AUDIO_PLAYING;
+          }
+
+          sei();
+        }
+      }
+
+      //break;
     
-    case DEVICE_RECOVERED:
+    //case DEVICE_RECOVERED:
       // fill up buffers for next round
-      fillBuffer();
+      //fillBuffer();
 
       // re-enable the fall interrupt
       //initAccelInterruptPin();
@@ -179,34 +209,23 @@ void loop()
       // put the flash memory to sleep
       //deepSleepFlash();
 
-      mcu_state = RESTING;
-      break;
+  //     mcu_state = RESTING;
+  //     break;
 
-    default:
-      break;
-  }
+  //   default:
+  //     break;
+  // }
 }
 
 ISR(PORTA_PORT_vect) {
-    // Check to see if the interrupt came from the audio sht down pin
-    if (PORTA.INTFLAGS & PIN5_bm) {
-        PORTA.INTFLAGS &= PIN5_bm;
+  // interrupt came from accelerometer
+  if (INTRPT_FROM_ACCELR) {
+      PORTA.INTFLAGS &= PIN4_bm;
+      // Disable the interrupt
+      // PORTA.PIN4CTRL &= ~PORT_ISC_gm;
+      // PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
 
-        mcu_state = DEVICE_RECOVERED;
-        return;
-    }
-
-    // interrupt came from accelerometer
-    if (PORTA.INTFLAGS & PIN4_bm) {
-        PORTA.INTFLAGS &= PIN4_bm;
-        // Disable the interrupt
-        // PORTA.PIN4CTRL &= ~PORT_ISC_gm;
-        // PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-
-        // works better when I call it here..
-        //readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
-
-        mcu_state = FALL_DETECTED;
-        return;
-    }
+      mcu_state = FALL_DETECTED;
+      return;
+  }
 }

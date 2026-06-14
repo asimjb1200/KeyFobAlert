@@ -13,3 +13,4 @@ void deepSleepFlash();
 void wakeUpFlash();
 void checkFlashConnection();
 void getFlashElectronicInfo();
+bool is_flash_blank(uint32_t total_size_bytes);

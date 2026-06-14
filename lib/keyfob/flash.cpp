@@ -121,3 +121,32 @@ void wakeUpFlash() {
     digitalWrite(CS_PIN, HIGH);
     delayMicroseconds(10);
 }
+
+bool is_flash_blank(uint32_t total_size_bytes) {
+    uint32_t address = 0;
+    uint8_t buffer[256];
+    
+    // 1. Assert Chip Select (Low)
+    digitalWrite(CS_PIN, LOW);
+    
+    // 2. Send Read Command (0x03) and 24-bit starting address (0x000000)
+    SPI.transfer(READ_CMD);
+    SPI.transfer((address >> 16) & 0xFF);
+    SPI.transfer((address >> 8) & 0xFF);
+    SPI.transfer(address & 0xFF);
+    
+    // 3. Continuously stream data and look for any non-0xFF byte
+    for (uint32_t i = 0; i < total_size_bytes; i++) {
+        uint8_t b = SPI.transfer(0x00); // Clock in next byte
+        
+        if (b != 0xFF) {
+            // Found data! De-assert CS and exit early
+            digitalWrite(CS_PIN, HIGH);
+            return false; 
+        }
+    }
+    
+    // 4. De-assert Chip Select (High)
+    digitalWrite(CS_PIN, HIGH);
+    return true; // Entire chip is 0xFF
+}
