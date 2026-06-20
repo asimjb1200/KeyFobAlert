@@ -1,11 +1,11 @@
 #pragma once
 
 typedef enum {
-    RESTING, 
-    FALL_DETECTED,
-    AUDIO_PLAYING,
-    DEVICE_RECOVERED,
-    CHARGING // need to create an interrupt that informs me when the battery is full
+    RESTING = 0, 
+    FALL_DETECTED = 1,
+    AUDIO_PLAYING = 2,
+    DEVICE_RECOVERED = 3,
+    CHARGING = 4
 } MCU_State_t;
 
 extern volatile MCU_State_t mcu_state;

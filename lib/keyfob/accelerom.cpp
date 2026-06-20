@@ -94,3 +94,11 @@ void initAccelInterruptPin() {
 
   PORTA.PIN4CTRL = PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
 }
+
+void disableAccelInterruptPin() {
+  PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_ISC_INPUT_DISABLE_gc;
+}
+
+void enableAccelInterruptPin() {
+  PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
+}

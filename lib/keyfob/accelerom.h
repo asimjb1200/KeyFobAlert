@@ -14,3 +14,4 @@ bool initFreeFallDetection();
 void initAccelInterruptPin();
 bool verifyAccelConnection();
 uint8_t readRegister(uint8_t deviceAddress, uint8_t deviceRegister);
+void disableAccelInterruptPin();

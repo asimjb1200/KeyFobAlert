@@ -119,7 +119,6 @@ void wakeUpFlash() {
     digitalWrite(CS_PIN, LOW);
     SPI.transfer(WAKE_UP_CMD);
     digitalWrite(CS_PIN, HIGH);
-    delayMicroseconds(10);
 }
 
 bool is_flash_blank(uint32_t total_size_bytes) {

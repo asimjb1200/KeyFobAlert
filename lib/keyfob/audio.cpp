@@ -44,7 +44,7 @@ void setupStopAudioPin() {
     // Set pin PA5 to input
     PORTA.DIRCLR = PIN5_bm;
 
-    PORTA.PIN5CTRL |= PORT_PULLUPEN_bm;
+    PORTA.PIN5CTRL = PORT_PULLUPEN_bm;
 }
 
 /**disable the counter and the interrupt from the periodic timer */
@@ -56,15 +56,15 @@ void disableHardwareTimer()
 
 void enableHardwareTimer()
 {
-    // enables the interrupt from my timer
-    TCB0.INTCTRL = TCB_CAPT_bm;
-
     /**
      * Enable the counter by writing a ‘1’ to the ENABLE bit in the Control A (TCBn.CTRLA) register.
      * The counter will start counting clock ticks according to the prescaler setting in the Clock Select (CLKSEL) bit
      * field in the Control A (TCBn.CTRLA) register.
-     */
-    TCB0_CTRLA |= TCB_ENABLE_bm;
+    */
+    TCB0_CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
+
+    // enables the interrupt from my timer
+    TCB0.INTCTRL = TCB_CAPT_bm;
 }
 
 /**
@@ -83,15 +83,7 @@ void initHardwareTimer()
     */
     TCB0.CCMP = 452;
 
-    /**
-     * Enable the counter by writing a ‘1’ to the ENABLE bit in the Control A (TCBn.CTRLA) register.
-     * The counter will start counting clock ticks according to the prescaler setting in the Clock Select (CLKSEL) bit
-     * field in the Control A (TCBn.CTRLA) register.
-    */
-    TCB0_CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
-
-    // enables the interrupt from my timer
-    TCB0.INTCTRL = TCB_CAPT_bm;
+    enableHardwareTimer();
 }
 
 void fillBuffer()

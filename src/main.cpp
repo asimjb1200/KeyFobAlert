@@ -7,12 +7,16 @@
 #include <flash.h>
 #include <SPI.h>
 #include <avr/io.h>
+#include <util/delay.h>
 extern "C" {
     #include <avr/cpufunc.h>
 }
 
 
-volatile MCU_State_t mcu_state = DEVICE_RECOVERED; 
+volatile MCU_State_t mcu_state = RESTING;
+uint8_t debounceDelay = 150;
+bool last_pressed;
+uint32_t toggle_time;
 
 void scanBusForDevices() {
   for (uint8_t addr = 1; addr < 127; addr++) {
@@ -21,6 +25,78 @@ void scanBusForDevices() {
       Serial.print("Device found at: 0x");
       Serial.println(addr, HEX);
     }
+  }
+}
+
+void processMCUState() {
+  Serial.print("state=");
+  Serial.println((uint8_t)mcu_state);
+  Serial.flush();
+  switch ((uint8_t)mcu_state)
+  {
+    case RESTING:
+      Serial.println("Resting State");
+      Serial.flush();
+      deepSleepFlash();
+      sleep_mode();
+      break;
+
+     case FALL_DETECTED:
+  //     Serial.println("Fall Detected");
+  //     Serial.flush();
+      // clear the interrupt & play audio
+      // noInterrupts();
+      // readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
+      // sei();
+      //enableHardwareTimer();
+      wakeUpFlash();
+      //Serial.println("Flash ready");Serial.flush();
+      mcu_state = AUDIO_PLAYING;
+      break;
+    
+    case AUDIO_PLAYING:
+      if (bufferOneNeedsFill || bufferTwoNeedsFill)
+      {
+        //noInterrupts();
+        fillBuffer();
+        //sei();
+      }
+
+      bool pressed = AUDIO_BTN_PRESSED;
+
+      // Check if stop audio button was pressed (PA5 Pulled to GND)
+      if (pressed && last_pressed == false && millis() - toggle_time > 100) {
+        mcu_state = DEVICE_RECOVERED;
+        Serial.print("recovered. Pressed=");Serial.println((int)pressed);Serial.flush();
+      }
+      if (pressed != last_pressed) {
+        toggle_time = millis();
+      }
+      last_pressed = pressed;
+
+      break;
+    
+    case DEVICE_RECOVERED:
+      // fill up buffers for next round
+      Serial.println("Recovering...");Serial.flush();
+      //fillBuffer();
+      
+
+      // re-enable the fall interrupt
+      //PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_ISC_LEVEL_gc;
+
+      mcu_state = RESTING;
+      Serial.println("going to sleep");Serial.flush();
+      break;
+
+    case CHARGING:
+      Serial.println("charging state!");
+      break;
+
+    default:
+      Serial.println("Unknown state!");
+      mcu_state = RESTING;
+      break;
   }
 }
 
@@ -59,7 +135,7 @@ void setup() {
 
   Serial.begin(115200);
 
-  delay(10000);
+  delay(3000);
 
   // initialize the CS pin for usage with SPI
   pinMode(CS_PIN, OUTPUT);
@@ -69,15 +145,13 @@ void setup() {
 
   delay(100);
 
-
-    // start audio data from the beginning
+  // start audio data from the beginning
   lastMemoryAddress = 0;
   Serial.println("buff fill start");
   Serial.flush();
   fillBuffer(); // get audio data ready
   Serial.print("buff fill end. last memory address: ");Serial.println(lastMemoryAddress);
   Serial.flush();
-
 
   delay(100);
   Serial.println("int pin start");
@@ -122,110 +196,73 @@ void setup() {
   Serial.flush();
   delay(100);
 
-  // if (accelSetUp) {
-
-    // select which sleep mode to enter and enable the sleep controller
-  //   set_sleep_mode(SLEEP_MODE_STANDBY);
-  // } else {
-  //    Serial.println("set up failed");
-  // }
+  if (accelSetUp) {
+    //select which sleep mode to enter and enable the sleep controller
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  } else {
+     Serial.println("set up failed");
+  }
 }
 
 void loop()
 {
+  int currentState = (int)mcu_state; 
 
-  // Serial.println("Sleep Mode");
-  // Serial.flush();
+  Serial.print("state=");
+  Serial.println((int)currentState);
+  Serial.flush();
 
-  // if (mcu_state == MCU_State_t::RESTING)
-  // {
-  //   sleep_mode();
-  // }
+  if (currentState == MCU_State_t::RESTING) {
+      // RESTING
+      Serial.println("Resting State");
+      Serial.flush();
+      deepSleepFlash();
+      sleep_mode();
+  } else if (currentState == MCU_State_t::FALL_DETECTED) {
+    // FALL_DETECTED
+    wakeUpFlash();
+    //Serial.println("Flash ready");Serial.flush();
+    mcu_state = AUDIO_PLAYING;
+  } else if (currentState == MCU_State_t::AUDIO_PLAYING) {
+    // AUDIO_PLAYING
+    if (bufferOneNeedsFill || bufferTwoNeedsFill)
+    {
+      //noInterrupts();
+      fillBuffer();
+      //sei();
+    }
 
-  // small delay to allow the full fall to take place
-  //delay(2000);
+    bool pressed = AUDIO_BTN_PRESSED;
 
-  // switch (mcu_state)
-  // {
-  //   case RESTING:
-  //     Serial.println("Resting State");
-  //     Serial.flush();
-  //     break;
-
-  //   case FALL_DETECTED:
-  //     Serial.println("Fall Detected");
-  //     Serial.flush();
-      // clear the interrupt & play audio
-      //readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
-
-      //wakeUpFlash();
-
-      // enable the periodic timer for audio playback
-      //enableHardwareTimer();
-      // mcu_state = AUDIO_PLAYING;
-      // break;
-    
-    // case AUDIO_PLAYING:
-      if (bufferOneNeedsFill || bufferTwoNeedsFill)
-      {
-        noInterrupts();
-        fillBuffer();
-        sei();
-      }
-
-      // Check if stop audio button was pressed (PA5 Pulled to GND)
-      if (AUDIO_BTN_PRESSED) {
-        delay(30);
-        if (AUDIO_BTN_PRESSED) {
-          while (AUDIO_BTN_PRESSED) /* wait until PA5 is pulled to VDD */
-          {}
-          
-          //Serial.println("btn pressed");Serial.flush();
-
-          noInterrupts();
-          if (mcu_state == ::AUDIO_PLAYING) {
-            mcu_state = DEVICE_RECOVERED;
-          }
-          else {
-            mcu_state = AUDIO_PLAYING;
-          }
-
-          sei();
-        }
-      }
-
-      //break;
-    
-    //case DEVICE_RECOVERED:
-      // fill up buffers for next round
-      //fillBuffer();
-
-      // re-enable the fall interrupt
-      //initAccelInterruptPin();
-
-      // stop the periodic timer
-      //disableHardwareTimer();
-
-      // put the flash memory to sleep
-      //deepSleepFlash();
-
-  //     mcu_state = RESTING;
-  //     break;
-
-  //   default:
-  //     break;
-  // }
+    // Check if stop audio button was pressed (PA5 Pulled to GND)
+    if (pressed && last_pressed == false && millis() - toggle_time > 100) {
+      mcu_state = DEVICE_RECOVERED;
+      Serial.print("recovered. Pressed=");Serial.println((int)pressed);Serial.flush();
+    }
+    if (pressed != last_pressed) {
+      toggle_time = millis();
+    }
+    last_pressed = pressed;
+  } else if (currentState == MCU_State_t::DEVICE_RECOVERED) {
+      Serial.println("Force-entering Recovered Block!");
+      Serial.flush();
+      // RE-enable accelerator interrupt pin
+      PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_ISC_LEVEL_gc;
+      mcu_state = RESTING;
+  } else {
+      Serial.print("Unknown state value: ");
+      Serial.println(currentState);
+  }
 }
 
 ISR(PORTA_PORT_vect) {
-  // interrupt came from accelerometer
   if (INTRPT_FROM_ACCELR) {
-      PORTA.INTFLAGS &= PIN4_bm;
-      // Disable the interrupt
-      // PORTA.PIN4CTRL &= ~PORT_ISC_gm;
-      // PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+    PORTA.INTFLAGS &= PIN4_bm;
 
-      mcu_state = FALL_DETECTED;
-      return;
+    // Disable the interrupt
+    disableAccelInterruptPin();
+
+    mcu_state = FALL_DETECTED;
+    return;
   }
 }
