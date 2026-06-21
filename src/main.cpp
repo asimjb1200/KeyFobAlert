@@ -14,6 +14,7 @@ extern "C" {
 
 
 volatile MCU_State_t mcu_state = RESTING;
+
 uint8_t debounceDelay = 150;
 bool last_pressed;
 uint32_t toggle_time;
@@ -28,14 +29,19 @@ void scanBusForDevices() {
   }
 }
 
+void updateMCUState(MCU_State_t desiredState) {
+  mcu_state = desiredState;
+}
+
 void processMCUState() {
+  bool pressed;
   Serial.print("state=");
   Serial.println((uint8_t)mcu_state);
   Serial.flush();
   switch ((uint8_t)mcu_state)
   {
     case RESTING:
-      Serial.println("Resting State");
+      Serial.print("Resting ");
       Serial.flush();
       deepSleepFlash();
       sleep_mode();
@@ -50,23 +56,21 @@ void processMCUState() {
       // sei();
       //enableHardwareTimer();
       wakeUpFlash();
-      //Serial.println("Flash ready");Serial.flush();
-      mcu_state = AUDIO_PLAYING;
+
+      updateMCUState(AUDIO_PLAYING);
       break;
     
     case AUDIO_PLAYING:
       if (bufferOneNeedsFill || bufferTwoNeedsFill)
       {
-        //noInterrupts();
         fillBuffer();
-        //sei();
       }
 
-      bool pressed = AUDIO_BTN_PRESSED;
+      pressed = AUDIO_BTN_PRESSED;
 
       // Check if stop audio button was pressed (PA5 Pulled to GND)
       if (pressed && last_pressed == false && millis() - toggle_time > 100) {
-        mcu_state = DEVICE_RECOVERED;
+        updateMCUState(DEVICE_RECOVERED);
         Serial.print("recovered. Pressed=");Serial.println((int)pressed);Serial.flush();
       }
       if (pressed != last_pressed) {
@@ -83,10 +87,13 @@ void processMCUState() {
       
 
       // re-enable the fall interrupt
-      //PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_ISC_LEVEL_gc;
+      
+      PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
+      PORTA.INTFLAGS = PIN4_bm;
 
-      mcu_state = RESTING;
-      Serial.println("going to sleep");Serial.flush();
+      //Serial.print(PORTA.INTFLAGS, HEX);Serial.flush();
+
+      updateMCUState(RESTING);
       break;
 
     case CHARGING:
@@ -95,7 +102,7 @@ void processMCUState() {
 
     default:
       Serial.println("Unknown state!");
-      mcu_state = RESTING;
+      updateMCUState(RESTING);
       break;
   }
 }
@@ -135,7 +142,7 @@ void setup() {
 
   Serial.begin(115200);
 
-  delay(3000);
+  delay(10000);
 
   // initialize the CS pin for usage with SPI
   pinMode(CS_PIN, OUTPUT);
@@ -206,58 +213,12 @@ void setup() {
 
 void loop()
 {
-  int currentState = (int)mcu_state; 
-
-  Serial.print("state=");
-  Serial.println((int)currentState);
-  Serial.flush();
-
-  if (currentState == MCU_State_t::RESTING) {
-      // RESTING
-      Serial.println("Resting State");
-      Serial.flush();
-      deepSleepFlash();
-      sleep_mode();
-  } else if (currentState == MCU_State_t::FALL_DETECTED) {
-    // FALL_DETECTED
-    wakeUpFlash();
-    //Serial.println("Flash ready");Serial.flush();
-    mcu_state = AUDIO_PLAYING;
-  } else if (currentState == MCU_State_t::AUDIO_PLAYING) {
-    // AUDIO_PLAYING
-    if (bufferOneNeedsFill || bufferTwoNeedsFill)
-    {
-      //noInterrupts();
-      fillBuffer();
-      //sei();
-    }
-
-    bool pressed = AUDIO_BTN_PRESSED;
-
-    // Check if stop audio button was pressed (PA5 Pulled to GND)
-    if (pressed && last_pressed == false && millis() - toggle_time > 100) {
-      mcu_state = DEVICE_RECOVERED;
-      Serial.print("recovered. Pressed=");Serial.println((int)pressed);Serial.flush();
-    }
-    if (pressed != last_pressed) {
-      toggle_time = millis();
-    }
-    last_pressed = pressed;
-  } else if (currentState == MCU_State_t::DEVICE_RECOVERED) {
-      Serial.println("Force-entering Recovered Block!");
-      Serial.flush();
-      // RE-enable accelerator interrupt pin
-      PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_ISC_LEVEL_gc;
-      mcu_state = RESTING;
-  } else {
-      Serial.print("Unknown state value: ");
-      Serial.println(currentState);
-  }
+  processMCUState();
 }
 
 ISR(PORTA_PORT_vect) {
   if (INTRPT_FROM_ACCELR) {
-    PORTA.INTFLAGS &= PIN4_bm;
+    PORTA.INTFLAGS = PIN4_bm;
 
     // Disable the interrupt
     disableAccelInterruptPin();

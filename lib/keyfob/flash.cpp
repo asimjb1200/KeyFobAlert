@@ -99,8 +99,10 @@ void readNextDataChunk(uint16_t size, uint8_t* buffer) {
     
     uint16_t bytesToRead = (lastMemoryAddress + size > fileSize) ? (fileSize - lastMemoryAddress) : size;
     
+    noInterrupts();
     readFlash(lastMemoryAddress, bytesToRead, buffer);
-    
+    sei();
+
     lastMemoryAddress += bytesToRead;
     saveLastMemoryAddress();
     
