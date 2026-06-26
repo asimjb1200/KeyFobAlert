@@ -40,9 +40,9 @@ void checkFlashConnection() {
     // Combine the last two bytes into a single uint16_t (big-endian)
     uint16_t deviceId = ((uint16_t)devHigh << 8) | (uint16_t)devLow;
 
-    Serial.print("jedecId ID: 0x"); Serial.println(jedecId, HEX);
-    Serial.print("Flash ID: 0x"); Serial.println(deviceId, HEX);
-    Serial.flush();
+    // Serial.print("jedecId ID: 0x"); Serial.println(jedecId, HEX);
+    // Serial.print("Flash ID: 0x"); Serial.println(deviceId, HEX);
+    // Serial.flush();
 }
 
 void getFlashElectronicInfo() {
@@ -55,9 +55,9 @@ void getFlashElectronicInfo() {
     uint8_t deviceId = SPI.transfer(0x00);
     digitalWrite(CS_PIN, HIGH);
 
-    Serial.print("manufacturerId: 0x"); Serial.println(manufacturerId, HEX);
-    Serial.print("deviceId: 0x"); Serial.println(deviceId, HEX);
-    Serial.flush();
+    // Serial.print("manufacturerId: 0x"); Serial.println(manufacturerId, HEX);
+    // Serial.print("deviceId: 0x"); Serial.println(deviceId, HEX);
+    // Serial.flush();
 }
 
 void readFlash(uint32_t address, uint16_t size, uint8_t* buffer) {

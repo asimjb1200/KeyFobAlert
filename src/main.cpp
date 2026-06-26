@@ -35,15 +35,14 @@ void updateMCUState(MCU_State_t desiredState) {
 
 void processMCUState() {
   bool pressed;
-  Serial.print("state=");
-  Serial.println((uint8_t)mcu_state);
-  Serial.flush();
+  // Serial.print("state=");
+  // Serial.println((uint8_t)mcu_state);
+  // Serial.flush();
   switch ((uint8_t)mcu_state)
   {
     case RESTING:
-      Serial.print("Resting ");
-      Serial.flush();
       deepSleepFlash();
+      shutdownAmp();
       sleep_mode();
       break;
 
@@ -54,25 +53,22 @@ void processMCUState() {
       // noInterrupts();
       // readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
       // sei();
-      //enableHardwareTimer();
-      wakeUpFlash();
 
+      enableAmp();
+      wakeUpFlash();
       updateMCUState(AUDIO_PLAYING);
       break;
     
     case AUDIO_PLAYING:
-      if (bufferOneNeedsFill || bufferTwoNeedsFill)
-      {
-        fillBuffer();
-      }
+      fillBuffer();
 
       pressed = AUDIO_BTN_PRESSED;
 
       // Check if stop audio button was pressed (PA5 Pulled to GND)
       if (pressed && last_pressed == false && millis() - toggle_time > 100) {
         updateMCUState(DEVICE_RECOVERED);
-        Serial.print("recovered. Pressed=");Serial.println((int)pressed);Serial.flush();
       }
+
       if (pressed != last_pressed) {
         toggle_time = millis();
       }
@@ -82,26 +78,21 @@ void processMCUState() {
     
     case DEVICE_RECOVERED:
       // fill up buffers for next round
-      Serial.println("Recovering...");Serial.flush();
-      //fillBuffer();
+      fillBuffer();
       
 
       // re-enable the fall interrupt
-      
-      PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
-      PORTA.INTFLAGS = PIN4_bm;
-
-      //Serial.print(PORTA.INTFLAGS, HEX);Serial.flush();
+      enableAccelInterruptPin();
 
       updateMCUState(RESTING);
       break;
 
     case CHARGING:
-      Serial.println("charging state!");
+      //Serial.println("charging state!");
       break;
 
     default:
-      Serial.println("Unknown state!");
+      //Serial.println("Unknown state!");
       updateMCUState(RESTING);
       break;
   }
@@ -111,11 +102,11 @@ void checkMCUAndAccelConnections() {
   uint8_t deviceID = SIGROW_DEVICEID0;
   uint8_t serialNum = SIGROW_SERNUM0;
   
-  Serial.print("Device ID: 0x"); Serial.println(deviceID, HEX);
+  // Serial.print("Device ID: 0x"); Serial.println(deviceID, HEX);
 
-  Serial.print("Serial Num: 0x"); Serial.println(serialNum, HEX);
+  // Serial.print("Serial Num: 0x"); Serial.println(serialNum, HEX);
 
-  Serial.flush();
+  // Serial.flush();
 
   scanBusForDevices();
 
@@ -140,9 +131,7 @@ void initMCUClock()
 void setup() {
   initMCUClock();
 
-  Serial.begin(115200);
-
-  delay(10000);
+  //Serial.begin(115200);
 
   // initialize the CS pin for usage with SPI
   pinMode(CS_PIN, OUTPUT);
@@ -154,38 +143,18 @@ void setup() {
 
   // start audio data from the beginning
   lastMemoryAddress = 0;
-  Serial.println("buff fill start");
-  Serial.flush();
+
   fillBuffer(); // get audio data ready
-  Serial.print("buff fill end. last memory address: ");Serial.println(lastMemoryAddress);
-  Serial.flush();
 
-  delay(100);
-  Serial.println("int pin start");
-  Serial.flush();
   initAccelInterruptPin();
-  Serial.println("int pin done");
-  Serial.flush();
-  delay(100);
 
-  Serial.println("DAC init begin");
-  Serial.flush();
   setupDAC();
-  Serial.println("DAC init complete");
-  Serial.flush();
-  delay(100);
-  
-  Serial.println("Timer set up begin");
-  Serial.flush();
-  initHardwareTimer();
-  Serial.println("Timer set up complete");
-  Serial.flush();
 
-  Serial.println("stop audio start");
-  Serial.flush();
+  setupShutdownAmpPin();
+
+  initHardwareTimer();
+
   setupStopAudioPin();
-  Serial.println("stop audio end");
-  Serial.flush();
   
   Wire.begin();
   delay(100);
@@ -196,18 +165,18 @@ void setup() {
   // checkFlashConnection();
   // getFlashElectronicInfo();
   
-  Serial.println("free fall init started");
-  Serial.flush();
+  // Serial.println("free fall init started");
+  // Serial.flush();
   uint8_t accelSetUp = initFreeFallDetection();
-  Serial.println("Free fall detection initialized successfully");
-  Serial.flush();
+  // Serial.println("Free fall detection initialized successfully");
+  // Serial.flush();
   delay(100);
 
   if (accelSetUp) {
     //select which sleep mode to enter and enable the sleep controller
     set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   } else {
-     Serial.println("set up failed");
+     //Serial.println("set up failed");
   }
 }
 

@@ -47,6 +47,23 @@ void setupStopAudioPin() {
     PORTA.PIN5CTRL = PORT_PULLUPEN_bm;
 }
 
+void setupShutdownAmpPin() {
+    // set pin PB2 to output
+    PORTB.DIRSET = PIN2_bm;
+
+    // pull it low for now
+    PORTB.OUT &= ~PIN2_bm;
+}
+
+void enableAmp() {
+    PORTB.OUT |= PIN2_bm;
+}
+
+void shutdownAmp() {
+    // pull it low for now
+    PORTB.OUT &= ~PIN2_bm;
+}
+
 /**disable the counter and the interrupt from the periodic timer */
 void disableHardwareTimer()
 {
