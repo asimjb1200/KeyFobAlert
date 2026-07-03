@@ -12,12 +12,17 @@ extern "C" {
     #include <avr/cpufunc.h>
 }
 
-
 volatile MCU_State_t mcu_state = RESTING;
+volatile bool keepBmsAlive = false;
 
 uint8_t debounceDelay = 150;
 bool last_pressed;
 uint32_t toggle_time;
+
+// key pin for MH-CD42 battery mgmt chip
+unsigned long pulseStartTime = 0;
+bool isPulseActive = false;
+const unsigned long KEY_PIN_PULSE_DURATION = 100; // 100ms pulse
 
 void scanBusForDevices() {
   for (uint8_t addr = 1; addr < 127; addr++) {
@@ -33,6 +38,42 @@ void updateMCUState(MCU_State_t desiredState) {
   mcu_state = desiredState;
 }
 
+void setupKeepBMSAlivePin() {
+    // set pin PB3 to output
+    PORTB.DIRSET = PIN3_bm;
+
+    // pull it HIGH for now
+    PORTB.OUT |= PIN3_bm;
+}
+
+/** pulse the key pin for around 100ms to keep the BMS from shutting down */
+void keepBMSAlive() {
+
+  if (millis() - pulseStartTime >= KEY_PIN_PULSE_DURATION) {
+    // pull key pin back high
+    PORTB.OUT |= PIN3_bm;
+    pulseStartTime = 0;
+    isPulseActive = false;
+    keepBmsAlive = false;
+  } 
+
+  if (!isPulseActive) {
+    // record the timestamp
+    pulseStartTime = millis();
+  }
+
+  // pull the pin low
+  if (!isPulseActive)
+    PORTB.OUT &= ~PIN3_bm;
+  
+  isPulseActive = true;
+}
+
+/** Disable the RTC temporarily while the MCU is doing other things */
+void disableRTC() {
+  RTC.CTRLA &= ~RTC_RTCEN_bm;
+}
+
 void processMCUState() {
   bool pressed;
   // Serial.print("state=");
@@ -41,9 +82,14 @@ void processMCUState() {
   switch ((uint8_t)mcu_state)
   {
     case RESTING:
-      deepSleepFlash();
-      shutdownAmp();
-      sleep_mode();
+      if (keepBmsAlive) {
+        keepBMSAlive();
+      } else {
+        deepSleepFlash();
+        shutdownAmp();
+        sleep_mode();
+      }
+
       break;
 
      case FALL_DETECTED:
@@ -56,6 +102,7 @@ void processMCUState() {
 
       enableAmp();
       wakeUpFlash();
+      disableRTC();
       updateMCUState(AUDIO_PLAYING);
       break;
     
@@ -80,9 +127,11 @@ void processMCUState() {
       // fill up buffers for next round
       fillBuffer();
       
-
       // re-enable the fall interrupt
       enableAccelInterruptPin();
+
+      // re-enable the RTC
+      RTC.CTRLA |= RTC_RTCEN_bm;
 
       updateMCUState(RESTING);
       break;
@@ -128,10 +177,47 @@ void initMCUClock()
   }
 }
 
+/**
+ * You must always verify if your target number fits inside the hardware register box.
+ * Target Ticks = Target Time x Clock Frequency
+ * If Target Ticks > Register Max (65,535 for 16-bit, 255 for 8-bit), you must use a prescaler to slow down the clock frequency.
+ */
+void initRTC() {
+  // wait for all registers to be synchronized
+  while (RTC.STATUS > 0){}
+  
+  // use the internal 1kHz clock for the RTC
+  RTC.CLKSEL = RTC_CLKSEL_INT1K_gc;
+
+  /**
+   * Set the overflow value in the Period register.
+   * the 16-bit RTC Counter uses a Period (PER) register that counts to any number up to 65,535 (clock ticks). 
+   * To make this work for my limit of 20 seconds, I need a way to have 20 seconds represented in 65k clock ticks or less.
+   * Since my chosen clock ticks at 1,024 a second (1,024Hz clock), I can calculate how many ticks occur in 20 seconds
+   * 20 seconds x 1024 ticks/sec = 20,480 ticks. 20,480 fits cleanly inside a 16-bit register with plenty of room to spare
+  */
+  RTC.PER = 20480;
+
+  /**
+   * Enable the desired interrupts by writing to the respective interrupt enable bits (CMP, OVF). 
+   * The moment RTC.CNT equals RTC.PER, the hardware triggers an Overflow Interrupt
+  */
+  RTC.INTCTRL = RTC_OVF_bm;
+
+  RTC.DBGCTRL |= RTC_DBGRUN_bm;
+
+  // Configure the RTC internal prescaler and Enable the RTC by writing a ‘1’ to the RTC Peripheral Enable bit
+  RTC.CTRLA = RTC_PRESCALER_DIV1_gc | RTC_RTCEN_bm | RTC_RUNSTDBY_bm;
+}
+
 void setup() {
   initMCUClock();
+  initRTC();
+  setupKeepBMSAlivePin();
 
   //Serial.begin(115200);
+
+  //delay(10000);
 
   // initialize the CS pin for usage with SPI
   pinMode(CS_PIN, OUTPUT);
@@ -159,22 +245,13 @@ void setup() {
   Wire.begin();
   delay(100);
 
-  
-  //checkMCUAndAccelConnections();
-
-  // checkFlashConnection();
-  // getFlashElectronicInfo();
-  
-  // Serial.println("free fall init started");
-  // Serial.flush();
   uint8_t accelSetUp = initFreeFallDetection();
-  // Serial.println("Free fall detection initialized successfully");
-  // Serial.flush();
+
   delay(100);
 
   if (accelSetUp) {
     //select which sleep mode to enter and enable the sleep controller
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  set_sleep_mode(SLEEP_MODE_STANDBY);
   } else {
      //Serial.println("set up failed");
   }
@@ -195,4 +272,11 @@ ISR(PORTA_PORT_vect) {
     mcu_state = FALL_DETECTED;
     return;
   }
+}
+
+ISR(RTC_CNT_vect)
+{
+  RTC.INTFLAGS = RTC_OVF_bm;
+  
+  keepBmsAlive = true;
 }
