@@ -48,8 +48,7 @@ void setupKeepBMSAlivePin() {
 
 /** pulse the key pin for around 100ms to keep the BMS from shutting down */
 void keepBMSAlive() {
-
-  if (millis() - pulseStartTime >= KEY_PIN_PULSE_DURATION) {
+  if ((millis() - pulseStartTime >= KEY_PIN_PULSE_DURATION) && isPulseActive) {
     // pull key pin back high
     PORTB.OUT |= PIN3_bm;
     pulseStartTime = 0;
@@ -60,13 +59,10 @@ void keepBMSAlive() {
   if (!isPulseActive) {
     // record the timestamp
     pulseStartTime = millis();
-  }
-
-  // pull the pin low
-  if (!isPulseActive)
+    // pull the pin low
     PORTB.OUT &= ~PIN3_bm;
-  
-  isPulseActive = true;
+    isPulseActive = true;
+  }
 }
 
 /** Disable the RTC temporarily while the MCU is doing other things */
