@@ -6,7 +6,14 @@
 #define TIMER_PERIPHERAL TCA0
 //static constexpr int CLK_FREQ = 20'000'000;
 
-// set up the enable pin that will control whether or not the voltage booster chip is on or not
+// used for the switch button that the user will press to stop the audio
+void setupStopAudioPin() {
+    // Set pin PA5 to input
+    PORTA.DIRCLR = PIN5_bm;
+
+    PORTA.PIN5CTRL = PORT_PULLUPEN_bm;
+}
+
 void setupShutdownBuzzerPin() {
     // set pin PB2 to output
     PORTB.DIRSET = PIN2_bm;

@@ -96,7 +96,7 @@ void processMCUState() {
 
       pressed = AUDIO_BTN_PRESSED;
 
-      // Check if stop audio button was pressed (PA5 Pulled to GND)
+      // polling check to see if stop audio button was pressed (PA5 Pulled to GND)
       if (pressed && last_pressed == false && millis() - toggle_time > 100) {
         updateMCUState(DEVICE_RECOVERED);
       }
@@ -200,6 +200,8 @@ void setup() {
   initAccelInterruptPin();
 
   setupShutdownBuzzerPin();
+
+  setupStopAudioPin();
   
   Wire.begin();
   delay(100);
