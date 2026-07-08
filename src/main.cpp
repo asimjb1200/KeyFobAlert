@@ -4,7 +4,6 @@
 #include <mcu_state.h>
 #include <accelerom.h>
 #include <audio.h>
-#include <flash.h>
 #include <SPI.h>
 #include <avr/io.h>
 #include <util/delay.h>
@@ -72,38 +71,28 @@ void disableRTC() {
 
 void processMCUState() {
   bool pressed;
-  // Serial.print("state=");
-  // Serial.println((uint8_t)mcu_state);
-  // Serial.flush();
+
   switch ((uint8_t)mcu_state)
   {
     case RESTING:
       if (keepBmsAlive) {
         keepBMSAlive();
       } else {
-        deepSleepFlash();
-        shutdownAmp();
+        shutdownBuzzer();
         sleep_mode();
       }
 
       break;
 
      case FALL_DETECTED:
-  //     Serial.println("Fall Detected");
-  //     Serial.flush();
       // clear the interrupt & play audio
-      // noInterrupts();
-      // readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
-      // sei();
-
-      enableAmp();
-      wakeUpFlash();
+      readRegister(ACCELEROMETER_ADDR, INT1_SRC_REGISTER);
+      enableBuzzer();
       disableRTC();
       updateMCUState(AUDIO_PLAYING);
       break;
     
     case AUDIO_PLAYING:
-      fillBuffer();
 
       pressed = AUDIO_BTN_PRESSED;
 
@@ -120,9 +109,6 @@ void processMCUState() {
       break;
     
     case DEVICE_RECOVERED:
-      // fill up buffers for next round
-      fillBuffer();
-      
       // re-enable the fall interrupt
       enableAccelInterruptPin();
 
@@ -211,32 +197,9 @@ void setup() {
   initRTC();
   setupKeepBMSAlivePin();
 
-  //Serial.begin(115200);
-
-  //delay(10000);
-
-  // initialize the CS pin for usage with SPI
-  pinMode(CS_PIN, OUTPUT);
-  digitalWrite(CS_PIN, HIGH);
-
-  SPI.begin();
-
-  delay(100);
-
-  // start audio data from the beginning
-  lastMemoryAddress = 0;
-
-  fillBuffer(); // get audio data ready
-
   initAccelInterruptPin();
 
-  setupDAC();
-
-  setupShutdownAmpPin();
-
-  initHardwareTimer();
-
-  setupStopAudioPin();
+  setupShutdownBuzzerPin();
   
   Wire.begin();
   delay(100);
