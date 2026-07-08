@@ -5,3 +5,4 @@ Microcontroller: ATtiny1614
 Speaker: Piezo Buzzer
 DC-DC Voltage Booster: TLV61046ADBVT
 Accelerometer: LIS2DH12
+Battery Mgmt System: IP5306
