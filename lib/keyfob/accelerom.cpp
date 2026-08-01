@@ -113,17 +113,17 @@ uint8_t readRegister(uint8_t deviceAddress, uint8_t deviceRegister) {
 }
 
 void initAccelInterruptPin() {
-  // set pin 2 as input, which is PA4
-  PORTA.DIRCLR = PIN4_bm;
+  // set pin 11 as input, which is PA1
+  PORTA.DIRCLR = PIN1_bm;
 
-  PORTA.PIN4CTRL = PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
+  INTERRUPT_PIN_CTRL = PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
 }
 
 void disableAccelInterruptPin() {
-  PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_ISC_INPUT_DISABLE_gc;
+  INTERRUPT_PIN_CTRL = (INTERRUPT_PIN_CTRL & ~PORT_ISC_gm) | PORT_ISC_INPUT_DISABLE_gc;
 }
 
 void enableAccelInterruptPin() {
-  PORTA.PIN4CTRL = (PORTA.PIN4CTRL & ~PORT_ISC_gm) | PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
+  INTERRUPT_PIN_CTRL = (INTERRUPT_PIN_CTRL & ~PORT_ISC_gm) | PORT_PULLUPEN_bm | PORT_ISC_LEVEL_gc;
   PORTA.INTFLAGS = PIN4_bm;
 }
