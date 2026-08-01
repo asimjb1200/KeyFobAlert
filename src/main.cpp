@@ -213,8 +213,6 @@ void setup() {
   if (accelSetUp) {
     //select which sleep mode to enter and enable the sleep controller
   set_sleep_mode(SLEEP_MODE_STANDBY);
-  } else {
-     //Serial.println("set up failed");
   }
 }
 
